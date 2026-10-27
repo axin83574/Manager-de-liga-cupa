@@ -1,1 +1,3 @@
-import app_site_streamlit  # Aplicația completă; main() rulează la import.
+from app_site_streamlit import main
+
+main()

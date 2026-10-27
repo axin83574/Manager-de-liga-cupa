@@ -19,7 +19,6 @@ import extra_streamlit_components as stx
 from supabase import create_client
 
 
-st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide")
 STATS_ECHIPA = {"meciuri_jucate": 0, "goluri_marcate": 0,
                 "goluri_primite": 0, "puncte": 0}
 STATS_JUCATOR = {"goluri": 0, "asisturi": 0,
@@ -1337,6 +1336,7 @@ def auth_view(cookie_manager):
 
 
 def main():
+    st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide")
     cookie_manager = stx.CookieManager(key="persistent_cookie_manager")
     if not st.session_state.get("theme_preference_changed"):
         saved_theme = browser_cookie(cookie_manager, THEME_COOKIE)
@@ -2537,4 +2537,5 @@ def main():
                    f"Mod local · date ligi: `{BASE_DIR}` · conturi: `{USERS_FILE}`. Pentru Streamlit Cloud configurează SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY.")
 
 
-main()
+if __name__ == "__main__":
+    main()
