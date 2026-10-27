@@ -1,0 +1,7 @@
+.streamlit/secrets.toml
+liga_baza.json
+*_supabase_backup_*.json
+ligi/
+utilizatori.json
+sesiune.json
+__pycache__/
