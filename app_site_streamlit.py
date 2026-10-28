@@ -1221,7 +1221,8 @@ def save_award_ballot(path, award_key, choices, username=None, guest_invite=None
     _store_league(path, fresh)
 
 
-def render_award_ballot(data, award, path, username=None, guest_invite=None, widget_key=""):
+def render_award_ballot(data, award, path, username=None, guest_invite=None, widget_key="",
+                        touch_friendly=False):
     if award.get("tip") != "jucator" or award_is_automatic(award):
         return
     settings = data.get("setari_liga", {})
@@ -1260,9 +1261,16 @@ def render_award_ballot(data, award, path, username=None, guest_invite=None, wid
             saved = previous_choices[index] if index < len(previous_choices) else {}
             saved_choice = (saved.get("echipa"), saved.get("jucator")) if isinstance(saved, dict) else None
             default_index = candidates.index(saved_choice) if saved_choice in candidates else index
-            choices.append(st.selectbox(f"Locul {index + 1} · {5 - index} puncte", candidates,
-                index=default_index, format_func=lambda choice: labels[choice],
-                key=f"{ballot_key}_rank_{index}"))
+            if touch_friendly:
+                with st.container(key=f"spectator_award_picker_{ballot_key}_{index}"):
+                    choice = st.radio(f"Locul {index + 1} · {5 - index} puncte", candidates,
+                        index=default_index, format_func=lambda item: labels[item],
+                        key=f"{ballot_key}_rank_{index}")
+            else:
+                choice = st.selectbox(f"Locul {index + 1} · {5 - index} puncte", candidates,
+                    index=default_index, format_func=lambda item: labels[item],
+                    key=f"{ballot_key}_rank_{index}")
+            choices.append(choice)
         submit = st.form_submit_button("Salvează votul", type="primary")
     if submit:
         if len(set(choices)) != 5:
@@ -1685,7 +1693,7 @@ def save_motm_vote(path, match_id, voter_id, team, player, username=None, guest_
 
 
 def render_motm_voting(data, match, path, username=None, profile=None,
-                       guest_invite=None, widget_key=None):
+                       guest_invite=None, widget_key=None, touch_friendly=False):
     if not match.get("id"):
         st.caption("Votul nu este disponibil pentru acest meci.")
         return
@@ -1745,7 +1753,12 @@ def render_motm_voting(data, match, path, username=None, profile=None,
     default_index = labels.index(previous_label) if previous_label in labels else 0
     suffix = widget_key or str(match["id"])
     with st.form(f"motm_vote_{safe_slug(str(suffix))}"):
-        selected_label = st.selectbox("Votează pentru", labels, index=default_index)
+        if touch_friendly:
+            with st.container(key=f"spectator_motm_picker_{safe_slug(str(suffix))}"):
+                selected_label = st.radio("Votează pentru", labels, index=default_index,
+                    key=f"spectator_motm_choice_{safe_slug(str(suffix))}")
+        else:
+            selected_label = st.selectbox("Votează pentru", labels, index=default_index)
         submit_vote = st.form_submit_button("Trimite votul", type="primary")
     if submit_vote:
         team, player = candidate_by_label[selected_label]
@@ -1793,17 +1806,19 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     with t3:
         ordered_matches = ordered_by_stage(data.get("istoric_meciuri", []))
         if ordered_matches:
-            selected_match = st.selectbox(
-                "Alege un meci",
-                ordered_matches,
-                format_func=lambda m: f"Etapa {m.get('etapa') or '—'} · {m.get('e1')} {m.get('goluri_e1', 0)}–{m.get('goluri_e2', 0)} {m.get('e2')}",
-                key=f"viewer_history_match_{safe_slug(league_key(entry))}")
+            with st.container(key="spectator_match_picker"):
+                selected_match = st.radio(
+                    "Alege un meci",
+                    ordered_matches,
+                    format_func=lambda m: f"Etapa {m.get('etapa') or '—'} · {m.get('e1')} {m.get('goluri_e1', 0)}–{m.get('goluri_e2', 0)} {m.get('e2')}",
+                    key=f"viewer_history_match_{safe_slug(league_key(entry))}")
             with st.container(border=True):
                 render_match_history_details(selected_match)
                 st.divider()
                 st.markdown("##### ⭐ Votează omul meciului")
                 render_motm_voting(data, selected_match, entry["path"], username, profile, guest_invite,
-                    widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}")
+                    widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}",
+                    touch_friendly=True)
         else:
             st.info("Nu există încă meciuri înregistrate în această ligă.")
     with t4:
@@ -1836,13 +1851,15 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                                 st.write(f"Retur: {returned['e1']} {returned['goluri_e1']} – {returned['goluri_e2']} {returned['e2']}")
                                 st.caption(f"Scor agregat {match['e1']} {aggregate_home} – {aggregate_away} {match['e2']} · se califică {slot.get('castigator') or 'urmează returul'}")
                                 render_motm_voting(data, returned, entry["path"], username, profile, guest_invite,
-                                    widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}")
+                                    widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}",
+                                    touch_friendly=True)
                             else:
                                 st.caption("Returul urmează.")
                         else:
                             st.write(f"{match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']} · câștigă {slot.get('castigator')}")
                         render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
-                            widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
+                            widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}",
+                            touch_friendly=True)
                     else:
                         st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
     with tabs[1]:
@@ -1876,7 +1893,8 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 if award["tip"] == "jucator" and not award_is_automatic(award):
                     with st.container(border=True):
                         render_award_ballot(data, award, entry["path"], username, guest_invite,
-                            widget_key=f"viewer-{league_key(entry)}-{award['cheie']}")
+                            widget_key=f"viewer-{league_key(entry)}-{award['cheie']}",
+                            touch_friendly=True)
     if can_choose_player:
         with tabs[7]:
             teams = list(data.get("echipe", {}))
@@ -1894,13 +1912,18 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                         st.info("Liga nu are încă echipe. Deocamdată poți rămâne spectator.")
                     else:
                         league_widget_id = f"{safe_slug(entry['owner'])}_{safe_slug(entry['path'].stem)}"
-                        team = st.selectbox("Echipa ta", teams,
-                            index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0,
-                            key=f"viewer_team_{league_widget_id}")
+                        with st.container(key="spectator_profile_team_picker"):
+                            team = st.radio("Echipa ta", teams,
+                                index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0,
+                                key=f"viewer_team_{league_widget_id}")
                         players = list(data["echipe"][team].get("jucatori", {}))
-                        player = st.selectbox("Alege-ți jucătorul", players,
-                            index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0,
-                            key=f"viewer_player_{league_widget_id}_{safe_slug(team)}") if players else None
+                        if players:
+                            with st.container(key="spectator_profile_player_picker"):
+                                player = st.radio("Alege-ți jucătorul", players,
+                                    index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0,
+                                    key=f"viewer_player_{league_widget_id}_{safe_slug(team)}")
+                        else:
+                            player = None
                         if not players:
                             st.caption("Echipa aleasă nu are încă jucători în lot.")
                         save_link = st.button("Salvează alegerea", type="primary",
@@ -1938,14 +1961,20 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 st.write(f"Invitație pentru **{invitation.get('nume', 'Jucător invitat')}** · jucător în ligă")
                 selection_key = invitation.get("id")
                 prior = data.get("selectii_membri", {}).get(selection_key, {})
+                with st.container(key="spectator_invite_team_picker"):
+                    team = st.radio("Echipa", teams,
+                        index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0,
+                        key=f"spectator_invite_team_{safe_slug(str(selection_key))}")
+                players = list(data["echipe"][team].get("jucatori", {}))
+                if players:
+                    with st.container(key="spectator_invite_player_picker"):
+                        player = st.radio("Jucător din lot", players,
+                            index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0,
+                            key=f"spectator_invite_player_{safe_slug(str(selection_key))}_{safe_slug(team)}")
+                else:
+                    player = None
+                    st.caption("Echipa nu are jucători în lot încă.")
                 with st.form("viewer_profile_link"):
-                    team = st.selectbox("Echipa", teams,
-                        index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0)
-                    players = list(data["echipe"][team].get("jucatori", {}))
-                    player = st.selectbox("Jucător din lot", players,
-                        index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0) if players else None
-                    if not players:
-                        st.caption("Echipa nu are jucători în lot încă.")
                     save_link = st.form_submit_button("Salvează asocierea", disabled=not bool(players))
                 if save_link and player:
                     if username:
@@ -1976,12 +2005,17 @@ def render_guest_player_choice(data, path, invitation):
         st.info("Liga nu are încă echipe.")
         return
     previous = data.get("selectii_membri", {}).get(invitation.get("id"), {})
-    with st.form("guest_player_choice"):
-        team = st.selectbox("Echipa", teams,
+    with st.container(key="spectator_legacy_team_picker"):
+        team = st.radio("Echipa", teams,
             index=teams.index(previous["echipa"]) if previous.get("echipa") in teams else 0)
-        players = list(data["echipe"][team].get("jucatori", {}))
-        player = st.selectbox("Jucător", players,
-            index=players.index(previous["jucator"]) if previous.get("jucator") in players else 0) if players else None
+    players = list(data["echipe"][team].get("jucatori", {}))
+    if players:
+        with st.container(key="spectator_legacy_player_picker"):
+            player = st.radio("Jucător", players,
+                index=players.index(previous["jucator"]) if previous.get("jucator") in players else 0)
+    else:
+        player = None
+    with st.form("guest_player_choice"):
         if not players:
             st.caption("Echipa aleasă nu are jucători în lot.")
         submit = st.form_submit_button("Salvează alegerea", type="primary", disabled=not bool(players))
@@ -2297,6 +2331,14 @@ def main():
     [data-testid="stSidebar"] [data-testid="stRadio"] label { padding:9px 11px; border-radius:10px; transition:.15s ease; }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background:var(--hover); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background:var(--selected); color:var(--green-dark); font-weight:700; }
+    [class*="st-key-spectator_match_picker"] [role="radiogroup"],
+    [class*="st-key-spectator_motm_picker"] [role="radiogroup"],
+    [class*="st-key-spectator_award_picker"] [role="radiogroup"],
+    [class*="st-key-spectator_profile_"] [role="radiogroup"],
+    [class*="st-key-spectator_invite_"] [role="radiogroup"],
+    [class*="st-key-spectator_legacy_"] [role="radiogroup"] {
+        max-height: 190px; overflow-y: auto; overscroll-behavior: contain;
+    }
     h1,h2,h3 { font-family:'Manrope',sans-serif !important; letter-spacing:-.035em; color:var(--text); }
     h1 { font-weight:800 !important; }
     h2,h3 { font-weight:750 !important; }
@@ -2522,20 +2564,21 @@ def main():
             if st.button("👤 Profilul meu", width="stretch", key="open_global_profile"):
                 st.session_state["show_account_profile"] = True
                 st.rerun()
-            if st.button("Deconectare", width="stretch"):
-                revoke_remembered_account(cookie_manager)
-                st.session_state.pop("user_key", None)
-                st.session_state.pop("active_league_role", None)
-                st.session_state.pop("entered_league", None)
-                st.session_state.pop("active_league_picker", None)
-                st.session_state.pop("show_account_profile", None)
-                st.rerun()
         st.divider()
     if st.session_state.get("show_account_profile") and not is_guest:
         if st.button("↩ Înapoi la aplicație"):
             st.session_state.pop("show_account_profile", None)
             st.rerun()
         render_account_profile(username, profile, paths)
+        st.divider()
+        if st.button("Deconectare", type="secondary", key="logout_from_profile"):
+            revoke_remembered_account(cookie_manager)
+            st.session_state.pop("user_key", None)
+            st.session_state.pop("active_league_role", None)
+            st.session_state.pop("entered_league", None)
+            st.session_state.pop("active_league_picker", None)
+            st.session_state.pop("show_account_profile", None)
+            st.rerun()
         return
     by_label = {f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · "
                 f"{item['owner']} · {'proprie' if item['role'] == 'owner' else item['role']}": item
@@ -2616,22 +2659,7 @@ def main():
                         st.query_params["cod"] = normalized_code
                         st.rerun()
         return
-    if is_guest:
-        chosen_key = entered_key
-    else:
-        with st.sidebar:
-            if st.button("↩ Schimbă liga", width="stretch"):
-                st.session_state.pop("entered_league", None)
-                st.session_state.pop("active_league_picker", None)
-                st.rerun()
-            st.divider()
-            st.markdown("**Liga activă**")
-        labels_by_key = {league_key(item): label for label, item in by_label.items()}
-        chosen_key = st.sidebar.selectbox("Alege altă ligă", list(by_key),
-            index=list(by_key).index(entered_key), format_func=lambda key: labels_by_key[key], key="active_league_picker")
-        if chosen_key != entered_key:
-            st.session_state["entered_league"] = chosen_key
-            st.rerun()
+    chosen_key = entered_key
     selected_entry = by_key[chosen_key]
     path = selected_entry["path"]
     role = selected_entry["role"]
@@ -2644,6 +2672,13 @@ def main():
         render_view_only(data, username, profile, selected_entry,
                          guest_entry if guest_entry and guest_entry.get("access_method") == "legacy" else None,
                          guest_profile)
+        if not is_guest:
+            with st.sidebar:
+                st.divider()
+                if st.button("↩ Schimbă liga", width="stretch", key="change_league_viewer"):
+                    st.session_state.pop("entered_league", None)
+                    st.session_state.pop("active_league_picker", None)
+                    st.rerun()
         return
     pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
             "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export", "Setări ligă"]
@@ -2668,6 +2703,13 @@ def main():
         st.session_state["main_navigation"] = pages[0]
     page = st.sidebar.radio("Navigare", pages,
         format_func=lambda item: navigation_labels[item], key="main_navigation")
+    if not is_guest:
+        with st.sidebar:
+            st.divider()
+            if st.button("↩ Schimbă liga", width="stretch", key="change_league_member"):
+                st.session_state.pop("entered_league", None)
+                st.session_state.pop("active_league_picker", None)
+                st.rerun()
 
     if page == "Alegerea mea" and is_guest:
         render_guest_player_choice(data, path, guest_entry["invitation"])
