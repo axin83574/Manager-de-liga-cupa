@@ -1733,9 +1733,8 @@ def main():
                          guest_entry if guest_entry.get("access_method") == "legacy" else None,
                          guest_profile)
         return
-    pages = ["Clasament", "Echipe și jucători", "Meciuri și program", "Cupa",
-            "Statistici", "Premii sezon", "Transferuri", "Membri", "Import / export"]
-    pages.insert(pages.index("Statistici"), "Supercupa")
+    pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
+            "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export"]
     if not is_guest:
         pages.insert(-1, "Profil")
     elif guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
@@ -2256,23 +2255,21 @@ def main():
 
     if page == "Statistici":
         st.subheader("Statistici jucători")
-        st.caption("Clasamentele individuale se actualizează automat după înregistrarea meciurilor.")
+        st.caption("Alege un top, ca în aplicația principală. Valorile se actualizează după înregistrarea meciurilor.")
         stat_sections = (
             ("⚽ Marcatori", "goluri", "Goluri"),
-            ("🎯 Assisturi", "asisturi", "Assisturi"),
-            ("🟨 Cartonașe galbene", "cartonase_galbene", "Galbene"),
-            ("🟥 Cartonașe roșii", "cartonase_rosii", "Roșii"),
+            ("🎯 Asistenți", "asisturi", "Assisturi"),
+            ("🟨 Galbene", "cartonase_galbene", "Galbene"),
+            ("🟥 Roșii", "cartonase_rosii", "Roșii"),
         )
-        stat_cols = st.columns(2)
-        for col, (title, field, label) in zip(stat_cols * 2, stat_sections):
-            with col:
-                with st.container(border=True):
-                    st.markdown(f"#### {title}")
-                    rows = player_leaderboard(data, field, label)
-                    if rows:
-                        render_cards(rows)
-                    else:
-                        st.caption("Încă nu există date pentru acest clasament.")
+        stat_tabs = st.tabs([title for title, _, _ in stat_sections])
+        for tab, (title, field, label) in zip(stat_tabs, stat_sections):
+            with tab:
+                rows = player_leaderboard(data, field, label)
+                if rows:
+                    render_cards(rows)
+                else:
+                    st.info("Încă nu există date pentru acest top.")
 
     if page == "Premii sezon":
         st.subheader("Premii de sezon")
