@@ -737,6 +737,40 @@ def match_substitution_summary(match):
                       for event in substitutions) or "–"
 
 
+def render_match_history_details(match):
+    st.markdown(f"**{match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}**")
+    if match.get("masa_verde"):
+        st.caption(f"Victorie la masa verde pentru {match.get('masa_verde')}"
+                   + (f" · {match.get('motiv_mv')}" if match.get("motiv_mv") else ""))
+    events = sorted(match.get("evenimente", []), key=lambda event: event.get("minut", 0))
+    if events:
+        for event in events:
+            minute = event.get("minut", "—")
+            team = event.get("echipa", "")
+            if event.get("tip") == "Schimbare":
+                st.write(f"{minute}′ · {team} · Schimbare: {event.get('jucator', '—')} → {event.get('intra', '—')}")
+            else:
+                detail = f"{minute}′ · {team} · {event.get('tip', 'Eveniment')} · {event.get('jucator', '—')}"
+                if event.get("asist"):
+                    detail += f" (assist: {event['asist']})"
+                st.write(detail)
+        return
+    # Older imported matches may have player totals but no event-by-event timeline.
+    found_totals = False
+    for team_key, label in (("mod_e1", match.get("e1")), ("mod_e2", match.get("e2"))):
+        player_stats = match.get(team_key, {})
+        for player, stats in player_stats.items():
+            totals = [f"{amount} {name}" for key, name in (
+                ("goluri", "goluri"), ("asisturi", "assisturi"),
+                ("cartonase_galbene", "galbene"), ("cartonase_rosii", "roșii"))
+                if (amount := int(stats.get(key, 0) or 0))]
+            if totals:
+                found_totals = True
+                st.write(f"{label} · {player}: " + ", ".join(totals))
+    if not found_totals:
+        st.caption("Meciul a fost salvat fără evenimente individuale.")
+
+
 def render_match_event_entry(data, home, away, draft_id, initial_events=None,
                              minute_min=1, minute_max=150, substitution_history=None):
     """Interactive event entry with a live score preview."""
@@ -1726,7 +1760,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     can_choose_player = username or (guest_profile and guest_profile.get("kind") == "jucator") or (
         guest_invite and guest_invite.get("access_method") == "legacy"
         and guest_invite["invitation"].get("tip") == "jucator")
-    tabs = st.tabs(["Clasament", "Loturi", "Meciuri", "Program", "Cupe", "Premii"] +
+    tabs = st.tabs(["Clasament", "Loturi", "Istoric meciuri", "Program", "Cupe", "Statistici", "Premii"] +
                    (["Alegerea mea"] if can_choose_player else []))
     t1, t2, t3, t4, t5 = tabs[:5]
     with t1:
@@ -1746,6 +1780,8 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             "Schimbări": match_substitution_summary(m)}
             for m in ordered_matches])
         for match in ordered_matches:
+            with st.expander(f"Detalii · {match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')} · etapa {match.get('etapa') or '—'}"):
+                render_match_history_details(match)
             with st.expander(f"⭐ Votează · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
                 render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
                                    widget_key=f"viewer-{league_key(entry)}-{match.get('id')}")
@@ -1789,6 +1825,21 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                     else:
                         st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
     with tabs[5]:
+        st.subheader("Statistici jucători")
+        stat_sections = (
+            ("⚽ Marcatori", "goluri", "Goluri"),
+            ("🎯 Asistenți", "asisturi", "Assisturi"),
+            ("🟨 Galbene", "cartonase_galbene", "Galbene"),
+            ("🟥 Roșii", "cartonase_rosii", "Roșii"),
+        )
+        for tab, (title, field, label) in zip(st.tabs([section[0] for section in stat_sections]), stat_sections):
+            with tab:
+                rows = player_leaderboard(data, field, label)
+                if rows:
+                    render_cards(rows)
+                else:
+                    st.info("Încă nu există date pentru acest top.")
+    with tabs[6]:
         awards = []
         for award in definitii_premii(data):
             winners = award_winners(data, award)
@@ -1806,7 +1857,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                         render_award_ballot(data, award, entry["path"], username, guest_invite,
                             widget_key=f"viewer-{league_key(entry)}-{award['cheie']}")
     if can_choose_player:
-        with tabs[6]:
+        with tabs[7]:
             teams = list(data.get("echipe", {}))
             if username:
                 st.write(f"{profile.get('nume', username)} · @{username} · {profile.get('pozitie', 'Poziție nespecificată')}")
@@ -2846,6 +2897,8 @@ def main():
                            "Masa verde": "Da" if m.get("masa_verde") else ""}
                           for m in ordered_matches])
             for match in ordered_matches:
+                with st.expander(f"📋 Istoric · {match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')} · etapa {match.get('etapa') or '—'}"):
+                    render_match_history_details(match)
                 with st.expander(f"⭐ Omul meciului · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
                     render_motm_voting(data, match, path, username, profile,
                                        widget_key=f"league-{league_key(selected_entry)}-{match.get('id')}")
