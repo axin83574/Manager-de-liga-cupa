@@ -23,6 +23,16 @@ STATS_ECHIPA = {"meciuri_jucate": 0, "goluri_marcate": 0,
                 "goluri_primite": 0, "puncte": 0}
 STATS_JUCATOR = {"goluri": 0, "asisturi": 0,
                  "cartonase_galbene": 0, "cartonase_rosii": 0}
+POZITII_FOTBAL = (
+    "Portar", "Portar (GK)", "Fundaș", "Fundaș central (CB)",
+    "Fundaș dreapta (RB)", "Fundaș stânga (LB)",
+    "Fundaș dreapta avansat (RWB)", "Fundaș stânga avansat (LWB)",
+    "Mijlocaș defensiv (CDM)", "Mijlocaș central (CM)",
+    "Mijlocaș ofensiv (CAM)", "Mijlocaș dreapta (RM)",
+    "Mijlocaș stânga (LM)", "Extremă dreapta (RW)",
+    "Extremă stânga (LW)", "Atacant central (CF)", "Vârf (ST)",
+    "Mijlocaș", "Atacant", "Toate posturile", "Tot ca jucător de câmp",
+)
 TIPURI_GOL = ("Gol Normal", "Gol din Lovitură Liberă", "Penalty")
 TIPURI_EVENIMENT = TIPURI_GOL + ("Autogol", "Penalty Ratat",
                                  "Cartonaș Galben", "Cartonaș Roșu", "Schimbare")
@@ -320,7 +330,7 @@ def create_account(username, email, password, name, birthday, plays_professional
         raise ValueError("Data nașterii nu poate fi în viitor.")
     if plays_professional not in ("Da", "Nu"):
         raise ValueError("Alege dacă joci la un club profesionist.")
-    if position not in ("Portar", "Fundaș", "Mijlocaș", "Atacant"):
+    if position not in POZITII_FOTBAL:
         raise ValueError("Alege poziția ta în teren.")
     users = load_users()
     if normalized_username in users:
@@ -2008,7 +2018,7 @@ def render_account_profile(username, profile, paths):
                                      min_value=dt.date(1900, 1, 1), max_value=today)
             professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
                 index=0 if profile.get("joaca_fotbal") == "Da" else 1)
-            positions = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
+            positions = list(POZITII_FOTBAL)
             position = st.selectbox("Poziția ta", positions,
                 index=positions.index(profile["pozitie"]) if profile.get("pozitie") in positions else 0)
             save_profile = st.form_submit_button("Salvează profilul")
@@ -2223,7 +2233,7 @@ def auth_view(cookie_manager):
             birthday = st.date_input("Data nașterii", value=today.replace(year=today.year - 12),
                                      min_value=dt.date(1900, 1, 1), max_value=today)
             plays = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"])
-            position = st.selectbox("Poziția ta", ["Portar", "Fundaș", "Mijlocaș", "Atacant"])
+            position = st.selectbox("Poziția ta", list(POZITII_FOTBAL))
             password = st.text_input("Parolă (minimum 6 caractere)", type="password", key="new_password")
             confirm = st.text_input("Confirmă parola", type="password")
             remember_new = st.checkbox("Rămâi conectat pe acest dispozitiv (30 de zile)", value=True,
@@ -2631,28 +2641,59 @@ def main():
             "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export", "Setări ligă"]
     if is_guest and guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
         pages.insert(-1, "Alegerea mea")
-    if st.session_state.get("main_navigation") not in pages:
-        st.session_state["main_navigation"] = pages[0]
-    page = st.sidebar.radio(
-        "Navigare",
-        pages,
-        format_func=lambda item: {
-            "Clasament": "🏆  Clasament",
-            "Setări ligă": "⚙  Setări ligă",
-            "Echipe și jucători": "🛡  Echipe și jucători",
-            "Meciuri și program": "⚽  Meciuri și program",
-            "Cupa": "🥇  Cupa",
-            "Supercupa": "🏅  Supercupa",
-            "Statistici": "📊  Statistici",
-            "Premii sezon": "🏅  Premii sezon",
-            "Transferuri": "🔁  Transferuri",
-            "Membri": "👥  Membri",
-            "Profil": "👤  Profil",
-            "Alegerea mea": "🪪  Alegerea mea",
-            "Import / export": "⚙  Import / export",
-        }[item],
-        key="main_navigation",
-    )
+    navigation_labels = {
+        "Clasament": "🏆  Clasament",
+        "Setări ligă": "⚙  Setări ligă",
+        "Echipe și jucători": "🛡  Echipe și jucători",
+        "Meciuri și program": "⚽  Meciuri și program",
+        "Cupa": "🥇  Cupa",
+        "Supercupa": "🏅  Supercupa",
+        "Statistici": "📊  Statistici",
+        "Premii sezon": "🏅  Premii sezon",
+        "Transferuri": "🔁  Transferuri",
+        "Membri": "👥  Membri",
+        "Profil": "👤  Profil",
+        "Alegerea mea": "🪪  Alegerea mea",
+        "Import / export": "⚙  Import / export",
+    }
+    previous_navigation = st.session_state.get("main_navigation", pages[0])
+    if previous_navigation not in pages:
+        previous_navigation = pages[0]
+    desktop_navigation = st.session_state.get("main_navigation_desktop", previous_navigation)
+    mobile_navigation = st.session_state.get("main_navigation_mobile", previous_navigation)
+    if desktop_navigation in pages and desktop_navigation != previous_navigation:
+        current_navigation = desktop_navigation
+    elif mobile_navigation in pages and mobile_navigation != previous_navigation:
+        current_navigation = mobile_navigation
+    else:
+        current_navigation = previous_navigation
+    st.session_state["main_navigation"] = current_navigation
+    st.session_state["main_navigation_desktop"] = current_navigation
+    st.session_state["main_navigation_mobile"] = current_navigation
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] [role="radiogroup"] > label {
+      box-sizing: border-box; width: 100%; min-height: 46px; padding: 9px 12px;
+      display: flex; align-items: center; border-radius: 10px;
+    }
+    @media (max-width: 768px) {
+      .st-key-sidebar_nav_desktop { display: none !important; }
+      .st-key-sidebar_nav_mobile { display: block !important; }
+    }
+    @media (min-width: 769px) {
+      .st-key-sidebar_nav_mobile { display: none !important; }
+      .st-key-sidebar_nav_desktop { display: block !important; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    with st.sidebar:
+        with st.container(key="sidebar_nav_desktop"):
+            st.radio("Navigare", pages, format_func=lambda item: navigation_labels[item],
+                     key="main_navigation_desktop", label_visibility="collapsed")
+        with st.container(key="sidebar_nav_mobile"):
+            st.selectbox("Navigare", pages, format_func=lambda item: navigation_labels[item],
+                         key="main_navigation_mobile", label_visibility="collapsed", width="stretch")
+    page = current_navigation
 
     if page == "Alegerea mea" and is_guest:
         render_guest_player_choice(data, path, guest_entry["invitation"])
@@ -2811,7 +2852,7 @@ def main():
                          f"goluri {team['goluri_marcate']}–{team['goluri_primite']}")
                 with st.form(f"jucator_{name}"):
                     player_name = st.text_input("Jucător nou", key=f"pn_{name}")
-                    player_position = st.selectbox("Poziție", ["Nespecificată", "Portar", "Fundaș", "Mijlocaș", "Atacant"], key=f"pp_{name}")
+                    player_position = st.selectbox("Poziție", ["Nespecificată", *POZITII_FOTBAL], key=f"pp_{name}")
                     add_player = st.form_submit_button("Adaugă în lot")
                 if add_player:
                     if player_name.strip() in team["jucatori"]:
@@ -2854,7 +2895,7 @@ def main():
                     with st.form(f"player_position_form_{safe_slug(name)}"):
                         position_player = st.selectbox("Actualizează poziția", list(team["jucatori"]),
                             key=f"position_player_{safe_slug(name)}")
-                        player_positions = ["Nespecificată", "Portar", "Fundaș", "Mijlocaș", "Atacant"]
+                        player_positions = ["Nespecificată", *POZITII_FOTBAL]
                         previous_position = team["jucatori"][position_player].get("pozitie", "")
                         position_index = player_positions.index(previous_position) if previous_position in player_positions else 0
                         chosen_position = st.selectbox("Poziție nouă", player_positions, index=position_index,
@@ -3636,25 +3677,7 @@ def main():
             st.info("Invitații introduc codul pe ecranul de autentificare. Schimbarea unui cod dezactivează imediat codul vechi.")
 
             st.divider()
-            st.markdown("#### Acordă acces unui cont existent")
             data.setdefault("membri", [])
-            existing = {m.get("username", "").casefold() for m in data["membri"]}
-            candidates = sorted(k for k in load_users() if k != username and k not in existing)
-            if candidates:
-                with st.form("invite_account"):
-                    invite_username = st.selectbox("Cont de invitat", candidates)
-                    invite_role = st.selectbox("Drepturi", ["editor", "vizitator"],
-                        format_func=lambda r: "Editor · poate modifica liga" if r == "editor" else "Vizitator · doar vizualizare")
-                    invite_type = st.selectbox("Tip membru", ["spectator", "jucator"],
-                        format_func=lambda kind: "Spectator" if kind == "spectator" else "Jucător")
-                    invite = st.form_submit_button("Adaugă membrul")
-                if invite:
-                    data["membri"].append({"username": invite_username, "rol": invite_role,
-                        "tip": invite_type, "activ": True,
-                        "creat": dt.datetime.now().strftime("%d.%m.%Y %H:%M")})
-                    save_league(path, data); st.success(f"@{invite_username} are acces la ligă."); st.rerun()
-            else:
-                st.caption("Nu există alte conturi disponibile pentru invitație. Persoana trebuie să-și creeze întâi un cont.")
             if data["membri"]:
                 st.markdown("#### Acces acordat")
                 for index, member in enumerate(list(data["membri"])):
@@ -3694,7 +3717,7 @@ def main():
                                      min_value=dt.date(1900, 1, 1), max_value=today)
             professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
                 index=0 if profile.get("joaca_fotbal") == "Da" else 1)
-            positions = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
+            positions = list(POZITII_FOTBAL)
             position = st.selectbox("Poziția ta", positions,
                 index=positions.index(profile["pozitie"]) if profile.get("pozitie") in positions else 0)
             save_profile = st.form_submit_button("Salvează profilul")
