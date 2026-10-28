@@ -2561,8 +2561,8 @@ def main():
                          guest_entry if guest_entry and guest_entry.get("access_method") == "legacy" else None,
                          guest_profile)
         return
-    pages = ["Clasament", "Setări ligă", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
-            "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export"]
+    pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
+            "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export", "Setări ligă"]
     if is_guest and guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
         pages.insert(-1, "Alegerea mea")
     if st.session_state.get("main_navigation") not in pages:
