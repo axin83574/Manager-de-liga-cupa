@@ -132,12 +132,15 @@ def safe_slug(name):
 def load_users():
     if SUPABASE_ENABLED:
         rows = supabase_client().table("app_users").select("username,data").execute().data or []
-        return {row["username"]: row.get("data") or {} for row in rows}
+        return {str(row["username"]).strip().casefold(): row.get("data") or {}
+                for row in rows if row.get("username")}
     if not USERS_FILE.exists():
         return {}
     try:
         payload = json.loads(USERS_FILE.read_text(encoding="utf-8"))
-        return payload.get("utilizatori", {}) if isinstance(payload, dict) else {}
+        users = payload.get("utilizatori", {}) if isinstance(payload, dict) else {}
+        return {str(username).strip().casefold(): record
+                for username, record in users.items() if username}
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -1264,7 +1267,9 @@ def render_guest_player_choice(data, path, invitation):
 
 def auth_view(cookie_manager):
     st.markdown("## Intră în cont sau creează un profil")
-    st.caption("Conturile și ligile rămân separate pentru fiecare utilizator.")
+    st.caption("Conectează-te cu numele de utilizator ales la înregistrare și parola contului.")
+    if not SUPABASE_ENABLED:
+        st.warning("Baza de date online nu este conectată. Conturile create aici se pot pierde când aplicația repornește. Verifică Secrets în setările Streamlit Cloud.")
     pending = st.session_state.get("pending_remember_login")
     if pending:
         st.info("Se salvează conectarea pe acest dispozitiv. Te vei conecta imediat ce browserul confirmă salvarea.")
@@ -1274,7 +1279,7 @@ def auth_view(cookie_manager):
     login_tab, signup_tab = st.tabs(["Autentificare", "Cont nou"])
     with login_tab:
         with st.form("login_account"):
-            username = st.text_input("Nume de utilizator")
+            username = st.text_input("Nume de utilizator (nu adresa de e-mail)")
             password = st.text_input("Parolă", type="password")
             remember = st.checkbox("Rămâi conectat pe acest dispozitiv (30 de zile)", value=True)
             login = st.form_submit_button("Intră în cont", type="primary")
@@ -1307,7 +1312,7 @@ def auth_view(cookie_manager):
                     st.session_state.pop("active_league_picker", None)
                     st.rerun()
                 attempts.append(now)
-                st.error("Numele de utilizator sau parola sunt greșite.")
+                st.error("Nu am putut autentifica acest cont. Verifică numele de utilizator folosit la înregistrare (nu e-mailul) și parola. Dacă ai creat contul înainte de conectarea Supabase, este posibil să nu existe în baza de date online.")
     with signup_tab:
         with st.form("signup_account"):
             username = st.text_input("Nume de utilizator", key="new_username")
