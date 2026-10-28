@@ -2263,7 +2263,8 @@ def auth_view(cookie_manager):
 
 
 def main():
-    st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide")
+    st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide",
+                       initial_sidebar_state="expanded")
     cookie_manager = stx.CookieManager(key="persistent_cookie_manager")
     # Tema este fixată pe întunecat pentru a evita diferențele de contrast
     # dintre componentele Streamlit și stilurile personalizate.
@@ -2286,6 +2287,14 @@ def main():
     [data-testid="stMainBlockContainer"] { max-width:1440px; padding-top:2rem; padding-bottom:4rem; }
     [data-testid="stSidebar"] { background:var(--sidebar); border-right:1px solid var(--line); }
     [data-testid="stSidebar"] * { color:var(--text); }
+    [data-testid="stSidebar"] {
+        display: block !important; width: 19rem !important; min-width: 19rem !important; max-width: 19rem !important;
+        transform: translateX(0) !important; visibility: visible !important; opacity: 1 !important;
+        position: relative !important; flex-shrink: 0 !important;
+    }
+    [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapsedControl"] {
+        display: none !important; visibility: hidden !important;
+    }
     [data-testid="stSidebar"] [data-testid="stRadio"] label { padding:9px 11px; border-radius:10px; transition:.15s ease; }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background:var(--hover); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background:var(--selected); color:var(--green-dark); font-weight:700; }
