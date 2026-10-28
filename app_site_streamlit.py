@@ -80,6 +80,11 @@ def all_db_league_rows():
 
 def normalizeaza_date(data):
     data.setdefault("nume_liga", "Liga mea")
+    settings = data.get("setari_liga")
+    if not isinstance(settings, dict):
+        settings = {}
+    settings.setdefault("motm_voting_mode", "no_players")
+    data["setari_liga"] = settings
     for key, default in (("echipe", {}), ("istoric_meciuri", []), ("program", []),
                          ("transferuri", []), ("cupe", []), ("invitatii", []), ("sterse", []),
                          ("membri", []), ("selectii_membri", {}), ("premii_alese", {})):
@@ -1100,6 +1105,33 @@ def ordered_by_stage(records):
     return [record for _, record in sorted(enumerate(records), key=_stage_sort_key)]
 
 
+def pending_fixtures(data):
+    """Return scheduled fixtures that do not correspond to a recorded league match."""
+    fixtures = data.get("program", [])
+    matches = data.get("istoric_meciuri", [])
+    match_ids = {str(match.get("id")) for match in matches if match.get("id") is not None}
+    remaining = [match for match in matches]
+    pending = []
+    for fixture in fixtures:
+        fixture_match_id = fixture.get("meci_id")
+        if fixture_match_id and str(fixture_match_id) in match_ids:
+            linked = next((match for match in remaining
+                           if str(match.get("id")) == str(fixture_match_id)), None)
+            if linked:
+                remaining.remove(linked)
+            continue
+        fixture_teams = {fixture.get("e1"), fixture.get("e2")}
+        played_index = next((index for index, match in enumerate(remaining)
+            if {match.get("e1"), match.get("e2")} == fixture_teams
+            and (fixture.get("etapa") is None or match.get("etapa") is None
+                 or str(fixture.get("etapa")) == str(match.get("etapa")))), None)
+        if played_index is None:
+            pending.append(fixture)
+        else:
+            remaining.pop(played_index)
+    return ordered_by_stage(pending)
+
+
 def render_cards(rows):
     """Render compact, themed rows matching the original app's Treeview tables."""
     rows = list(rows)
@@ -1118,6 +1150,169 @@ def render_cards(rows):
               f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
               "</table></div>")
     st.markdown(markup, unsafe_allow_html=True)
+
+
+def _match_records(data):
+    yield from data.get("istoric_meciuri", [])
+    for cup in data.get("cupe", []):
+        for round_data in cup.get("runde", []):
+            for slot in round_data.get("meciuri", []):
+                if slot.get("meci"):
+                    yield slot["meci"]
+
+
+def _motm_voter(data, match, username=None, profile=None, guest_invite=None):
+    teams = {match.get("e1"), match.get("e2")}
+    mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
+    if username:
+        voter_id = "voter:" + hashlib.sha256(f"user:{username}".encode("utf-8")).hexdigest()
+        selection = ((profile or {}).get("selectii_ligi", {}).get(
+            st.session_state.get("entered_league", "")) or {})
+        # The league key is not necessarily the current-session key for spectators;
+        # use membership data as the authoritative fallback.
+        selection = data.get("selectii_membri", {}).get(username) or selection
+        member = next((item for item in data.get("membri", [])
+                       if str(item.get("username", "")).casefold() == username.casefold()
+                       and item.get("activ", True)), None)
+        own_player = ((selection.get("echipa"), selection.get("jucator"))
+                      if selection.get("echipa") and selection.get("jucator") else None)
+        if member and member.get("tip") == "jucator" and not own_player:
+            return voter_id, False, "Asociază-ți jucătorul în fila «Alegerea mea» înainte să votezi.", None
+        if mode == "no_players" and own_player and own_player[0] in teams:
+            return voter_id, False, "Jucătorii echipelor din acest meci nu pot vota.", own_player
+        return voter_id, True, "", own_player
+    if guest_invite:
+        invitation = guest_invite.get("invitation", {})
+        voter_id = "voter:" + hashlib.sha256(
+            f"invite:{invitation.get('id')}".encode("utf-8")).hexdigest()
+        selection = data.get("selectii_membri", {}).get(invitation.get("id"), {})
+        team = selection.get("echipa") or invitation.get("echipa")
+        own_player = ((team, selection.get("jucator"))
+                      if team and selection.get("jucator") else None)
+        if invitation.get("tip") == "jucator" and not own_player:
+            return voter_id, False, "Asociază-ți jucătorul înainte să votezi.", None
+        if mode == "no_players" and own_player and team in teams:
+            return voter_id, False, "Jucătorii echipelor din acest meci nu pot vota.", own_player
+        return voter_id, True, "", own_player
+    voter_id = st.session_state.setdefault("motm_voter_id", f"spectator:{uuid.uuid4().hex}")
+    return voter_id, True, "", None
+
+
+def save_motm_vote(path, match_id, voter_id, team, player, username=None, guest_invite=None):
+    fresh = load_league(path)
+    if username:
+        owner = Path(path).parent.name
+        member = next((item for item in fresh.get("membri", [])
+                       if str(item.get("username", "")).casefold() == username.casefold()
+                       and item.get("activ", True)), None)
+        if owner.casefold() != username.casefold() and not member:
+            raise ValueError("Nu mai ai acces la această ligă.")
+    elif guest_invite:
+        invitation = guest_invite.get("invitation", {})
+        active = next((item for item in fresh.get("invitatii", [])
+                       if item.get("id") == invitation.get("id")
+                       and hmac.compare_digest(str(item.get("token", "")),
+                                               str(invitation.get("token", "")))
+                       and item.get("activ", True)), None)
+        if not active:
+            raise ValueError("Invitația nu mai este activă.")
+    else:
+        raise ValueError("Trebuie să intri în ligă înainte să votezi.")
+
+    target = next((item for item in _match_records(fresh)
+                   if str(item.get("id", "")) == str(match_id)), None)
+    if not target:
+        raise ValueError("Meciul nu mai există.")
+    if target.get("masa_verde"):
+        raise ValueError("Nu se votează omul meciului pentru o victorie la masa verde.")
+    if team not in (target.get("e1"), target.get("e2")):
+        raise ValueError("Jucătorul ales nu aparține uneia dintre echipele meciului.")
+    recorded_for_team = target.get("mod_e1", {}) if team == target.get("e1") else target.get("mod_e2", {})
+    if (player not in fresh.get("echipe", {}).get(team, {}).get("jucatori", {})
+            and player not in recorded_for_team):
+        raise ValueError("Jucătorul ales nu mai există în lot.")
+    _, eligible, reason, own_player = _motm_voter(fresh, target, username,
+        load_users().get(username, {}) if username else None, guest_invite)
+    if not eligible:
+        raise ValueError(reason)
+    if (fresh.get("setari_liga", {}).get("motm_voting_mode", "no_players") == "no_self_vote"
+            and own_player == (team, player)):
+        raise ValueError("Nu poți vota pentru propriul jucător.")
+    target.setdefault("voturi_motm", {})[voter_id] = {"echipa": team, "jucator": player}
+    _store_league(path, fresh)
+
+
+def render_motm_voting(data, match, path, username=None, profile=None,
+                       guest_invite=None, widget_key=None):
+    if not match.get("id"):
+        st.caption("Votul nu este disponibil pentru acest meci.")
+        return
+    if match.get("masa_verde"):
+        st.caption("Nu se votează omul meciului pentru o victorie la masa verde.")
+        return
+    teams = [match.get("e1"), match.get("e2")]
+    candidates = [(team, player) for team in teams if team in data.get("echipe", {})
+                  for player in data["echipe"][team].get("jucatori", {})]
+    for team, stats_key in ((teams[0], "mod_e1"), (teams[1], "mod_e2")):
+        candidates.extend((team, player) for player in match.get(stats_key, {})
+                          if (team, player) not in candidates)
+    st.markdown("**⭐ Omul meciului**")
+    if not candidates:
+        st.caption("Adaugă jucători în loturi pentru a putea vota.")
+        return
+    voter_id, eligible, reason, own_player = _motm_voter(data, match, username, profile, guest_invite)
+    votes = match.get("voturi_motm", {})
+    if not isinstance(votes, dict):
+        votes = {}
+    counts = {}
+    for vote in votes.values():
+        if isinstance(vote, dict):
+            candidate = (vote.get("echipa"), vote.get("jucator"))
+        elif isinstance(vote, str) and "|" in vote:
+            candidate = tuple(vote.split("|", 1))
+        else:
+            continue
+        if candidate in candidates:
+            counts[candidate] = counts.get(candidate, 0) + 1
+    total = sum(counts.values())
+    if total:
+        ordered = sorted(candidates, key=lambda candidate: (-counts.get(candidate, 0),
+                                                              candidate[1].casefold(), candidate[0].casefold()))
+        render_cards([{"Jucător": player, "Echipă": team, "Voturi": counts.get((team, player), 0)}
+                      for team, player in ordered if counts.get((team, player), 0)])
+        best = max(counts.values())
+        leaders = [player for (team, player), count in counts.items() if count == best]
+        st.caption((f"Lider la vot: {', '.join(leaders)} · {best} voturi · {total} voturi în total")
+                   if len(leaders) == 1 else f"Egalitate la {best} voturi · {total} voturi în total")
+    else:
+        st.caption("Încă nu s-a votat.")
+    if not eligible:
+        st.info(reason)
+        return
+    if data.get("setari_liga", {}).get("motm_voting_mode", "no_players") == "no_self_vote" and own_player:
+        candidates = [candidate for candidate in candidates if candidate != own_player]
+        st.caption("Jucătorii pot vota, dar nu își pot alege propriul profil.")
+        if not candidates:
+            st.info("Nu există alți jucători eligibili pentru vot.")
+            return
+    labels = [f"{player} · {team}" for team, player in candidates]
+    candidate_by_label = {f"{player} · {team}": (team, player) for team, player in candidates}
+    previous = votes.get(voter_id, {})
+    previous_label = (f"{previous.get('jucator')} · {previous.get('echipa')}"
+                      if isinstance(previous, dict) else str(previous).replace("|", " · "))
+    default_index = labels.index(previous_label) if previous_label in labels else 0
+    suffix = widget_key or str(match["id"])
+    with st.form(f"motm_vote_{safe_slug(str(suffix))}"):
+        selected_label = st.selectbox("Votează pentru", labels, index=default_index)
+        submit_vote = st.form_submit_button("Trimite votul", type="primary")
+    if submit_vote:
+        team, player = candidate_by_label[selected_label]
+        try:
+            save_motm_vote(path, match["id"], voter_id, team, player, username, guest_invite)
+            st.success("Votul tău a fost salvat. Îl poți schimba până când meciul este șters.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Nu am putut salva votul: {exc}")
 
 
 def render_view_only(data, username, profile, entry, guest_invite=None, guest_profile=None):
@@ -1154,13 +1349,21 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                                **{k: v for k, v in s.items() if k != "pozitie"}}
                               for p, s in info.get("jucatori", {}).items()])
     with t3:
+        ordered_matches = ordered_by_stage(data.get("istoric_meciuri", []))
         render_cards([{"Etapa": m.get("etapa") or "–", "Gazdă": m.get("e1"),
             "Scor": f"{m.get('goluri_e1', 0)} – {m.get('goluri_e2', 0)}", "Oaspeți": m.get("e2")}
-            for m in ordered_by_stage(data.get("istoric_meciuri", []))])
+            for m in ordered_matches])
+        for match in ordered_matches:
+            with st.expander(f"⭐ Votează · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
+                render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
+                                   widget_key=f"viewer-{league_key(entry)}-{match.get('id')}")
     with t4:
-        render_cards([{"Etapa": f.get("etapa"), "Gazdă": f.get("e1"), "Oaspeți": f.get("e2"),
-            "Data": f.get("data", ""), "Status": "Jucat" if f.get("meci_id") else "Programat"}
-            for f in data.get("program", [])])
+        fixtures = pending_fixtures(data)
+        if fixtures:
+            render_cards([{"Etapa": f.get("etapa"), "Gazdă": f.get("e1"), "Oaspeți": f.get("e2"),
+                "Data": f.get("data", ""), "Status": "Programat"} for f in fixtures])
+        else:
+            st.info("Nu există meciuri rămase în program.")
     with t5:
         for cup in data.get("cupe", []):
             st.markdown(f"### {'🏅 ' if cup.get('super') else ''}{cup.get('nume', 'Cupa')} · {cup.get('status', '')}")
@@ -1170,6 +1373,8 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                     match = slot.get("meci")
                     if match:
                         st.write(f"{match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']} · câștigă {slot.get('castigator')}")
+                        render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
+                            widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
                     else:
                         st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
     with tabs[5]:
@@ -1979,6 +2184,22 @@ def main():
             rename = st.text_input("Denumire", value=data["nume_liga"], key="rename")
             if st.button("Salvează denumirea") and rename.strip():
                 data["nume_liga"] = rename.strip(); save_league(path, data); st.rerun()
+            st.markdown("**Votul pentru omul meciului**")
+            voting_modes = {
+                "Spectatorii votează; jucătorii echipelor din meci nu votează": "no_players",
+                "Toți pot vota; jucătorii nu se pot vota pe ei": "no_self_vote",
+            }
+            current_mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
+            current_label = next((label for label, value in voting_modes.items()
+                                  if value == current_mode), next(iter(voting_modes)))
+            selected_mode_label = st.selectbox(
+                "Cine poate vota?", list(voting_modes), index=list(voting_modes).index(current_label),
+                key="motm_voting_mode_select")
+            if st.button("Salvează setările votului", key="save_motm_voting_settings"):
+                data.setdefault("setari_liga", {})["motm_voting_mode"] = voting_modes[selected_mode_label]
+                save_league(path, data)
+                st.success("Setarea votului pentru omul meciului a fost salvată.")
+                st.rerun()
 
     if page == "Echipe și jucători":
         st.subheader("Echipe și loturi")
@@ -2049,9 +2270,7 @@ def main():
         if len(teams) < 2:
             st.info("Adaugă cel puțin două echipe.")
         else:
-            match_ids = {m.get("id") for m in data["istoric_meciuri"]}
-            playable = [f for f in ordered_by_stage(data["program"])
-                        if not f.get("meci_id") or f.get("meci_id") not in match_ids]
+            playable = pending_fixtures(data)
             scheduled = st.selectbox("Meci programat (opțional)", [None, *playable],
                 format_func=lambda f: "Alege manual" if f is None else
                     f"Etapa {f.get('etapa') or '–'} · {f.get('e1')} – {f.get('e2')}" + (f" · {f.get('data')}" if f.get("data") else ""),
@@ -2095,10 +2314,15 @@ def main():
                     save_league(path, data); st.success("Meci salvat."); st.rerun()
         if data["istoric_meciuri"]:
             st.subheader("Rezultate")
+            ordered_matches = ordered_by_stage(data["istoric_meciuri"])
             render_cards([{"Etapa": m.get("etapa") or "–", "Gazdă": m["e1"],
                            "Scor": f"{m['goluri_e1']} – {m['goluri_e2']}", "Oaspeți": m["e2"],
                            "Masa verde": "Da" if m.get("masa_verde") else ""}
-                          for m in ordered_by_stage(data["istoric_meciuri"])])
+                          for m in ordered_matches])
+            for match in ordered_matches:
+                with st.expander(f"⭐ Omul meciului · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
+                    render_motm_voting(data, match, path, username, profile,
+                                       widget_key=f"league-{league_key(selected_entry)}-{match.get('id')}")
             with st.expander("Editează un rezultat"):
                 match_to_edit = st.selectbox("Meci de editat", data["istoric_meciuri"],
                     format_func=lambda m: f"{m.get('etapa') or '–'} · {m['e1']} {m['goluri_e1']}–{m['goluri_e2']} {m['e2']}",
@@ -2143,6 +2367,8 @@ def main():
                                 int(edited_round) or None, walkover=match_to_edit.get("masa_verde"),
                                 reason=match_to_edit.get("motiv_mv", ""))
                             corrected["id"] = old_id
+                            if "voturi_motm" in match_to_edit:
+                                corrected["voturi_motm"] = match_to_edit["voturi_motm"]
                             apply_match(data, corrected)
                             data["istoric_meciuri"].insert(old_index, data["istoric_meciuri"].pop())
                             for fixture in data["program"]:
@@ -2187,13 +2413,16 @@ def main():
                         data["program"].append({"id": uuid.uuid4().hex[:8], "etapa": int(stage),
                             "e1": fixture_home, "e2": fixture_away, "data": fixture_date.strip(), "meci_id": None})
                         save_league(path, data); st.success("Meciul a fost adăugat în program."); st.rerun()
-        if data["program"]:
+        fixtures = pending_fixtures(data)
+        if fixtures:
             render_cards([{"Etapa": f.get("etapa"), "Gazdă": f.get("e1"),
                            "Oaspeți": f.get("e2"), "Data": f.get("data", ""),
-                           "Status": "Jucat" if f.get("meci_id") else "Programat"}
-                          for f in ordered_by_stage(data["program"])])
+                           "Status": "Programat"}
+                          for f in fixtures])
             if st.button("Șterge programul"):
                 data["program"] = []; save_league(path, data); st.rerun()
+        elif data["program"]:
+            st.success("Toate meciurile din program au fost jucate.")
 
     if page == "Cupa":
         st.subheader("Cupa")
@@ -2299,6 +2528,8 @@ def main():
                                 penalty_note = " · decis la penaltyuri" if slot.get("penalti") else ""
                                 st.markdown(f"**{played['e1']}  {played['goluri_e1']} – {played['goluri_e2']}  {played['e2']}**")
                                 st.caption(f"Se califică {slot.get('castigator')}{penalty_note}.")
+                                render_motm_voting(data, played, path, username, profile,
+                                    widget_key=f"cup-{cup.get('id')}-{played.get('id')}")
                                 if st.button("Anulează acest rezultat și rundele următoare",
                                     key=f"cup_undo_{cup['id']}_{ri}_{mi}"):
                                     for old_match in clear_cup_result(cup, ri, mi):
@@ -2401,6 +2632,8 @@ def main():
                     if played_super:
                         penalty_note = " · decisă la penaltyuri" if final_slot.get("penalti") else ""
                         st.write(f"{played_super['goluri_e1']} – {played_super['goluri_e2']} · câștigă **{final_slot.get('castigator')}**{penalty_note}")
+                        render_motm_voting(data, played_super, path, username, profile,
+                            widget_key=f"supercup-{selected_supercup.get('id')}-{played_super.get('id')}")
                         if st.button("Anulează rezultatul Supercupei", key=f"supercup_undo_{selected_supercup['id']}"):
                             for old_match in clear_cup_result(selected_supercup, 0, 0):
                                 apply_player_stats(data, old_match["e1"], old_match.get("mod_e1", {}), -1)
@@ -2474,12 +2707,10 @@ def main():
     if page == "Premii sezon":
         st.subheader("Premii de sezon")
         st.caption("Alegi tu câștigătorii. Clasamentul și statisticile sunt sugestii; premiile nu se acordă automat.")
-        pending_fixtures = sum(1 for f in data.get("program", [])
-                               if not f.get("meci_id") or f.get("meci_id") not in
-                               {m.get("id") for m in data["istoric_meciuri"]})
+        pending_fixture_count = len(pending_fixtures(data))
         pending_cups = sum(1 for c in data.get("cupe", []) if not c.get("castigatoare"))
-        if pending_fixtures or pending_cups:
-            st.info(f"Sezonul este încă în desfășurare: {pending_fixtures} meciuri de ligă și {pending_cups} cupe fără câștigător. Poți acorda premiile oricând.")
+        if pending_fixture_count or pending_cups:
+            st.info(f"Sezonul este încă în desfășurare: {pending_fixture_count} meciuri de ligă și {pending_cups} cupe fără câștigător. Poți acorda premiile oricând.")
         teams_ranked = ranking(data)
         player_rows = [(team_name, player, stats) for team_name, team in data["echipe"].items()
                        for player, stats in team.get("jucatori", {}).items()]
