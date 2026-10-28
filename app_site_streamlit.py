@@ -1775,16 +1775,20 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                               for p, s in info.get("jucatori", {}).items()])
     with t3:
         ordered_matches = ordered_by_stage(data.get("istoric_meciuri", []))
-        render_cards([{"Etapa": m.get("etapa") or "–", "Gazdă": m.get("e1"),
-            "Scor": f"{m.get('goluri_e1', 0)} – {m.get('goluri_e2', 0)}", "Oaspeți": m.get("e2"),
-            "Schimbări": match_substitution_summary(m)}
-            for m in ordered_matches])
-        for match in ordered_matches:
-            with st.expander(f"Detalii · {match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')} · etapa {match.get('etapa') or '—'}"):
-                render_match_history_details(match)
-            with st.expander(f"⭐ Votează · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
-                render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
-                                   widget_key=f"viewer-{league_key(entry)}-{match.get('id')}")
+        if ordered_matches:
+            selected_match = st.selectbox(
+                "Alege un meci",
+                ordered_matches,
+                format_func=lambda m: f"Etapa {m.get('etapa') or '—'} · {m.get('e1')} {m.get('goluri_e1', 0)}–{m.get('goluri_e2', 0)} {m.get('e2')}",
+                key=f"viewer_history_match_{safe_slug(league_key(entry))}")
+            with st.container(border=True):
+                render_match_history_details(selected_match)
+                st.divider()
+                st.markdown("##### ⭐ Votează omul meciului")
+                render_motm_voting(data, selected_match, entry["path"], username, profile, guest_invite,
+                    widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}")
+        else:
+            st.info("Nu există încă meciuri înregistrate în această ligă.")
     with t4:
         fixtures = pending_fixtures(data)
         if fixtures:
