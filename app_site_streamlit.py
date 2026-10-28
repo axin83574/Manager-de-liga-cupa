@@ -513,62 +513,41 @@ def join_league_with_code(entry, username, access_code, member_choice=None):
     return role if entry["owner"].casefold() != username.casefold() else "owner"
 
 
-def spectator_entry_gate(entry):
-    code = entry["code"]
-    key = league_key(entry)
-    choice = st.session_state.get("spectator_profile", {})
-    if choice.get("league") == key and choice.get("code") == code and choice.get("kind") in ("jucator", "spectator"):
-        return choice
-    if choice.get("league") != key or choice.get("code") != code:
-        choice = {}
-        st.session_state.pop("spectator_profile", None)
-        st.session_state.pop("spectator_choice_stage", None)
-        st.session_state.pop("spectator_team_choice", None)
-        st.session_state.pop("spectator_player_choice", None)
+def save_code_member_choice(entry, username, team=None, player=None):
+    """Persist player/spectator choice for a logged-in viewer after entering the league."""
+    fresh = load_league(entry["path"])
+    member = next((item for item in fresh.setdefault("membri", [])
+                   if str(item.get("username", "")).casefold() == username.casefold()), None)
+    if member is None:
+        member = {"username": username, "rol": "vizitator", "activ": True,
+                  "creat": dt.datetime.now().strftime("%d.%m.%Y %H:%M"), "sursa": "cod"}
+        fresh["membri"].append(member)
+    if player:
+        if team not in fresh.get("echipe", {}) or player not in fresh["echipe"][team].get("jucatori", {}):
+            raise ValueError("Jucătorul ales nu mai există în lot. Alege din nou.")
+        member["tip"] = "jucator"
+        selection = {"echipa": team, "jucator": player, "tip": "jucator",
+                     "actualizat": dt.datetime.now().timestamp()}
+        fresh.setdefault("selectii_membri", {})[username] = selection
+    else:
+        member["tip"] = "spectator"
+        fresh.setdefault("selectii_membri", {}).pop(username, None)
+        selection = None
+    _store_league(entry["path"], fresh)
 
-    st.title("Înainte să intri în ligă")
-    st.caption(f"Ai acces de spectator la „{entry['data'].get('nume_liga', 'Liga')}”. Alege cum vrei să apari.")
-    if st.session_state.get("spectator_choice_stage") == "player":
-        teams = list(entry["data"].get("echipe", {}))
-        if not teams:
-            st.info("Liga nu are încă echipe. Poți intra doar ca spectator.")
-            if st.button("Intră ca spectator", type="primary"):
-                choice = {"league": key, "code": code, "kind": "spectator"}
-                st.session_state["spectator_profile"] = choice
-                st.rerun()
+    users = load_users()
+    record = users.get(username)
+    if record is not None:
+        selections = record.setdefault("selectii_ligi", {})
+        if selection:
+            selections[league_key(entry)] = {**selection, "pozitie": record.get("pozitie", "")}
         else:
-            team = st.selectbox("Echipa ta", teams, key="spectator_team_choice")
-            players = list(entry["data"]["echipe"][team].get("jucatori", {}))
-            player = st.selectbox("Alege-ți jucătorul", players, key="spectator_player_choice") if players else None
-            if not players:
-                st.caption("Echipa aleasă nu are încă jucători în lot.")
-            choose = st.button("Continuă ca jucător", type="primary", disabled=not bool(players))
-            if choose and player:
-                st.session_state["spectator_profile"] = {
-                    "league": key, "code": code, "kind": "jucator", "team": team, "player": player}
-                st.session_state.pop("spectator_choice_stage", None)
-                st.rerun()
-        if st.button("Înapoi", key="spectator_choice_back"):
-            st.session_state.pop("spectator_choice_stage", None)
-            st.rerun()
-        return None
-
-    player_col, spectator_col = st.columns(2, gap="large")
-    with player_col:
-        with st.container(border=True):
-            st.markdown("### ⚽ Sunt jucător în ligă")
-            st.caption("Îți alegi numele din lot, iar statisticile lui apar în profilul tău.")
-            if st.button("Alege-mi jucătorul", type="primary", key="choose_guest_player"):
-                st.session_state["spectator_choice_stage"] = "player"
-                st.rerun()
-    with spectator_col:
-        with st.container(border=True):
-            st.markdown("### 👁 Sunt doar spectator")
-            st.caption("Vezi liga fără asociere cu un jucător.")
-            if st.button("Intră ca spectator", key="choose_guest_spectator"):
-                st.session_state["spectator_profile"] = {"league": key, "code": code, "kind": "spectator"}
-                st.rerun()
-    return None
+            selections.pop(league_key(entry), None)
+        try:
+            save_users(users)
+            st.session_state.pop("player_profile_sync_error", None)
+        except Exception as exc:
+            st.session_state["player_profile_sync_error"] = str(exc)
 
 
 def create_user_league(username, name, source_entry=None, league_type="Ligă"):
@@ -1213,22 +1192,56 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 selection_key = league_key(entry)
                 prior = (profile.get("selectii_ligi", {}).get(selection_key) or
                          data.get("selectii_membri", {}).get(username, {}))
+                current_kind = "jucator" if prior.get("jucator") else "spectator"
+                mode = st.radio("Cum vrei să apari în ligă?", ["Spectator", "Jucător"],
+                    index=1 if current_kind == "jucator" else 0, horizontal=True,
+                    key=f"viewer_kind_{safe_slug(entry['owner'])}_{safe_slug(entry['path'].stem)}")
+                if mode == "Jucător":
+                    if not teams:
+                        st.info("Liga nu are încă echipe. Deocamdată poți rămâne spectator.")
+                    else:
+                        with st.form("viewer_profile_link"):
+                            team = st.selectbox("Echipa ta", teams,
+                                index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0)
+                            players = list(data["echipe"][team].get("jucatori", {}))
+                            player = st.selectbox("Alege-ți jucătorul", players,
+                                index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0) if players else None
+                            if not players:
+                                st.caption("Echipa aleasă nu are încă jucători în lot.")
+                            save_link = st.form_submit_button("Salvează alegerea", type="primary", disabled=not bool(players))
+                        if save_link and player:
+                            try:
+                                save_code_member_choice(entry, username, team, player)
+                                st.success("Alegerea ta a fost salvată.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Nu am putut salva alegerea: {exc}")
+                elif current_kind == "jucator":
+                    if st.button("Salvează ca spectator", key="save_viewer_spectator"):
+                        try:
+                            save_code_member_choice(entry, username)
+                            st.success("Acum apari în ligă ca spectator.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Nu am putut salva alegerea: {exc}")
+                else:
+                    st.info("Ai intrat ca spectator. Poți alege «Jucător» oricând.")
+                if st.session_state.get("player_profile_sync_error"):
+                    st.warning("Alegerea este salvată în ligă, dar nu s-a sincronizat în profilul contului. Statisticile ligii rămân disponibile.")
             elif guest_profile:
                 st.write(f"Profilul meu · **{guest_profile.get('player')}** · {guest_profile.get('team')}")
                 prior = data.get("selectii_membri", {}).get(guest_profile.get("profile_id"), {})
+                stats = data.get("echipe", {}).get(prior.get("echipa"), {}).get("jucatori", {}).get(prior.get("jucator"), {})
+                if stats:
+                    stat_cols = st.columns(4)
+                    for col, title, field in zip(stat_cols, ("Goluri", "Assisturi", "Galbene", "Roșii"),
+                            ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+                        col.metric(title, stats.get(field, 0))
             else:
                 invitation = guest_invite["invitation"]
                 st.write(f"Invitație pentru **{invitation.get('nume', 'Jucător invitat')}** · jucător în ligă")
                 selection_key = invitation.get("id")
                 prior = data.get("selectii_membri", {}).get(selection_key, {})
-            if guest_profile:
-                stats = data.get("echipe", {}).get(prior.get("echipa"), {}).get("jucatori", {}).get(prior.get("jucator"), {})
-                if stats:
-                    stat_cols = st.columns(4)
-                    for col, title, field in zip(stat_cols, ("Goluri", "Assisturi", "Galbene", "Roșii"),
-                        ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
-                        col.metric(title, stats.get(field, 0))
-            elif teams:
                 with st.form("viewer_profile_link"):
                     team = st.selectbox("Echipa", teams,
                         index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0)
@@ -1569,12 +1582,8 @@ def main():
     if is_code_access:
         profile = users[username]
         profile.setdefault("selectii_ligi", {})
-        if guest_entry.get("code_type") == "spectator" and guest_entry["owner"].casefold() != username.casefold():
-            guest_profile = spectator_entry_gate(guest_entry)
-            if guest_profile is None:
-                return
         try:
-            access_role = join_league_with_code(guest_entry, username, access_code, guest_profile)
+            access_role = join_league_with_code(guest_entry, username, access_code)
         except ValueError as exc:
             st.error(str(exc))
             if st.button("Înapoi la ligile mele"):
