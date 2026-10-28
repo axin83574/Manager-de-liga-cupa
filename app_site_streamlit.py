@@ -145,11 +145,9 @@ def load_users():
 def save_users(users):
     if SUPABASE_ENABLED:
         table = supabase_client().table("app_users")
-        existing = table.select("username").execute().data or []
-        keep = set(users)
-        for row in existing:
-            if row["username"] not in keep:
-                table.delete().eq("username", row["username"]).execute()
+        # `users` is a snapshot read earlier in this request. Deleting rows that
+        # are absent from it can erase accounts created by another session.
+        # Account removal is not part of this flow, so only upsert supplied rows.
         if users:
             table.upsert([{"username": username, "data": record}
                           for username, record in users.items()], on_conflict="username").execute()
@@ -1288,7 +1286,14 @@ def auth_view(cookie_manager):
                 st.error("Prea multe încercări. Așteaptă un minut și încearcă din nou.")
             else:
                 key = username.strip().lower()
-                record = load_users().get(key)
+                try:
+                    record = load_users().get(key)
+                except Exception as exc:
+                    st.error("Nu pot accesa baza de date a conturilor. Verifică setările Supabase din Streamlit Cloud și încearcă din nou.")
+                    st.caption(f"Detaliu: {exc}")
+                    record = None
+                    attempts.append(now)
+                    st.stop()
                 if record and verify_password(record, password):
                     st.session_state.pop("login_attempts", None)
                     if remember:
@@ -1333,6 +1338,9 @@ def auth_view(cookie_manager):
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
+                except Exception as exc:
+                    st.error("Contul nu a putut fi salvat în baza de date. Verifică setările Supabase din Streamlit Cloud.")
+                    st.caption(f"Detaliu: {exc}")
 
 
 def main():
@@ -1350,19 +1358,22 @@ def main():
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
-    :root { --bg:#f5f7f3; --paper:#fff; --panel:#fff; --panel2:#edf3ed; --line:#e2e9e1;
+    :root { color-scheme:light; --bg:#f5f7f3; --paper:#fff; --panel:#fff; --panel2:#edf3ed; --line:#e2e9e1;
             --text:#202a22; --muted:#718074; --green:#276747; --green-dark:#1e5238;
-            --pale:#e9f2eb; --gold:#b17b2d; --shadow:0 8px 28px rgba(33,55,38,.055); }
+            --pale:#e9f2eb; --gold:#b17b2d; --sidebar:#eef2ec; --hover:#e1eae1;
+            --selected:#dfece1; --input:#fcfdfb; --input-line:#dbe4da; --focus:#e5f0e7;
+            --disabled:#e4e9e4; --disabled-text:#68736b; --header:rgba(245,247,243,.9);
+            --shadow:0 8px 28px rgba(33,55,38,.055); }
     html, body, [class*="css"] { font-family:'DM Sans',sans-serif; }
     [data-testid="stAppViewContainer"] { background:var(--bg); color:var(--text); }
-    [data-testid="stHeader"] { background:rgba(245,247,243,.9); }
+    [data-testid="stHeader"] { background:var(--header); }
     [data-testid="stMainBlockContainer"] { max-width:1440px; padding-top:2rem; padding-bottom:4rem; }
-    [data-testid="stSidebar"] { background:#eef2ec; border-right:1px solid var(--line); }
+    [data-testid="stSidebar"] { background:var(--sidebar); border-right:1px solid var(--line); }
     [data-testid="stSidebar"] * { color:var(--text); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label { padding:9px 11px; border-radius:10px; transition:.15s ease; }
-    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background:#e1eae1; }
-    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background:#dfece1; color:var(--green-dark); font-weight:700; }
-    h1,h2,h3 { font-family:'Manrope',sans-serif !important; letter-spacing:-.035em; color:#202a22; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background:var(--hover); }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background:var(--selected); color:var(--green-dark); font-weight:700; }
+    h1,h2,h3 { font-family:'Manrope',sans-serif !important; letter-spacing:-.035em; color:var(--text); }
     h1 { font-weight:800 !important; }
     h2,h3 { font-weight:750 !important; }
     p, [data-testid="stCaptionContainer"] { color:var(--muted); }
@@ -1388,13 +1399,23 @@ def main():
     [data-baseweb="tab"][aria-selected="true"], .stTabs [aria-selected="true"] { color:var(--green) !important; }
     [data-baseweb="tab-highlight"] { background-color:var(--green) !important; height:3px; }
     [data-testid="stForm"], [data-testid="stExpander"] { border:1px solid var(--line); border-radius:14px; background:var(--paper); }
-    [data-testid="stVerticalBlockBorderWrapper"] > div { border-color:var(--line) !important; border-radius:16px !important; background:rgba(255,255,255,.84); box-shadow:var(--shadow); }
+    [data-testid="stVerticalBlockBorderWrapper"] > div { border-color:var(--line) !important; border-radius:16px !important; background:var(--paper); box-shadow:var(--shadow); }
     [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
     [data-testid="stDateInput"] input, [data-testid="stSelectbox"] [data-baseweb="select"] > div,
-    [data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-color:#dbe4da; border-radius:9px; background:#fcfdfb; }
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-color:var(--input-line); border-radius:9px; background:var(--input); color:var(--text); }
     [data-testid="stSelectbox"] [data-baseweb="select"] > div,
-    [data-testid="stMultiSelect"] [data-baseweb="select"] > div { background:#fff !important; color:var(--text) !important; }
-    [data-testid="stTextInput"] input:focus, [data-testid="stNumberInput"] input:focus { border-color:#78a68a; box-shadow:0 0 0 3px #e5f0e7; }
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div { background:var(--input) !important; color:var(--text) !important; }
+    [data-testid="stTextInput"] input:focus, [data-testid="stNumberInput"] input:focus { border-color:#78a68a; box-shadow:0 0 0 3px var(--focus); }
+    [data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"] { background:var(--paper) !important; color:var(--text) !important; }
+    [role="option"] { color:var(--text) !important; }
+    [role="option"]:hover, [aria-selected="true"][role="option"] { background:var(--panel2) !important; color:var(--text) !important; }
+    [data-testid="stWidgetLabel"], [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] * { color:var(--text); }
+    [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * { color:var(--muted); }
+    a { color:var(--green) !important; }
+    [data-testid="stAlert"] { color:var(--text); }
+    [data-testid="stRadio"] label, [data-testid="stCheckbox"] label,
+    [data-testid="stToggle"] label { color:var(--text) !important; }
     div.stButton > button, div.stFormSubmitButton > button { border-radius:9px;
         border:1px solid #dce5dc; min-height:42px; font-weight:700; transition:.15s ease; }
     div.stButton > button:hover, div.stFormSubmitButton > button:hover { border-color:#8aaf96; color:var(--green-dark); transform:translateY(-1px); }
@@ -1409,15 +1430,15 @@ def main():
     button[data-testid="stBaseButton-primary"]:hover, button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
         background:var(--green-dark) !important; border-color:var(--green-dark) !important; color:#fff !important; }
     button[data-testid="stBaseButton-primary"]:disabled, button[data-testid="stBaseButton-primaryFormSubmit"]:disabled {
-        background:#e4e9e4 !important; border-color:#d8dfd8 !important; color:#68736b !important;
+        background:var(--disabled) !important; border-color:var(--line) !important; color:var(--disabled-text) !important;
         box-shadow:none !important; opacity:1 !important; cursor:not-allowed !important; }
     button[data-testid="stBaseButton-primary"]:disabled *, button[data-testid="stBaseButton-primaryFormSubmit"]:disabled * {
-        color:#68736b !important; }
+        color:var(--disabled-text) !important; }
     button[data-testid="stBaseButton-secondary"] { color:var(--text) !important; }
     button[data-testid="stBaseButton-secondary"] * { color:inherit !important; }
     button[data-testid^="stBaseButton-"]:focus-visible { outline:3px solid #83bd94 !important; outline-offset:2px; }
     [data-testid="stAlert"] { border-radius:12px; }
-    [data-testid="stFileUploader"] section { border-radius:12px; border-color:#d7e2d7; background:#fbfcfa; }
+    [data-testid="stFileUploader"] section { border-radius:12px; border-color:var(--input-line); background:var(--input); color:var(--text); }
     .league-kicker { color:var(--green); text-transform:uppercase; letter-spacing:.14em;
         font-size:.74rem; font-weight:800; margin-bottom:.2rem; }
     .league-subtitle { color:var(--muted); margin-top:-.35rem; margin-bottom:1.5rem; font-size:1.03rem; }
@@ -1433,16 +1454,22 @@ def main():
           --panel:#1b2520 !important; --panel2:#24322a !important; --line:#34443a !important;
           --text:#e8f0e9 !important; --muted:#a5b4a8 !important; --green:#56b878 !important;
           --green-dark:#328c54 !important; --pale:#203a2a !important; --gold:#e5b86b !important;
+          --sidebar:#17211b !important; --hover:#24322a !important; --selected:#203a2a !important;
+          --input:#131c17 !important; --input-line:#46574b !important; --focus:#203a2a !important;
+          --disabled:#303b34 !important; --disabled-text:#b7c3ba !important;
+          --header:rgba(17,24,21,.94) !important;
           --shadow:0 10px 30px rgba(0,0,0,.2) !important; }
         [data-testid="stAppViewContainer"] { background:#111815 !important; color:#e8f0e9 !important; }
-        [data-testid="stHeader"] { background:rgba(17,24,21,.94) !important; }
+        [data-testid="stHeader"] { background:var(--header) !important; }
         [data-testid="stSidebar"] { background:#17211b !important; border-color:#34443a !important; }
-        [data-testid="stSidebar"] *, h1,h2,h3,[data-testid="stMarkdownContainer"] { color:#e8f0e9; }
+        [data-testid="stSidebar"] *, h1,h2,h3,[data-testid="stMarkdownContainer"],
+        [data-testid="stMarkdownContainer"] *,[data-testid="stWidgetLabel"] { color:#e8f0e9; }
         p,[data-testid="stCaptionContainer"],[data-testid="stCaptionContainer"] * { color:#a5b4a8 !important; }
         [data-testid="stMetric"],[data-testid="stForm"],[data-testid="stExpander"],
         [data-testid="stVerticalBlockBorderWrapper"] > div { background:#1b2520 !important;
           border-color:#34443a !important; color:#e8f0e9 !important; }
         [data-testid="stMetricValue"] { color:#82d39c !important; }
+        a { color:#82d39c !important; }
         [data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,[data-testid="stDateInput"] input,
         [data-testid="stTextArea"] textarea,[data-testid="stSelectbox"] [data-baseweb="select"] > div,
         [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
@@ -1454,6 +1481,9 @@ def main():
         [data-baseweb="tab"] { color:#a5b4a8 !important; }
         [data-baseweb="tab"][aria-selected="true"] { color:#82d39c !important; }
         [data-testid="stFileUploader"] section { background:#17211b !important; border-color:#46574b !important; }
+        [data-baseweb="popover"],[data-baseweb="menu"],[role="listbox"] { background:#1b2520 !important; color:#e8f0e9 !important; }
+        [role="option"] { color:#e8f0e9 !important; }
+        [role="option"]:hover,[aria-selected="true"][role="option"] { background:#24322a !important; color:#fff !important; }
         [data-testid="stAlert"] { background:#1b2520 !important; }
         button[data-testid="stBaseButton-secondary"] { background:#202d25 !important; color:#e8f0e9 !important; border-color:#405246 !important; }
         button[data-testid="stBaseButton-secondary"] * { color:#e8f0e9 !important; }
@@ -1725,20 +1755,8 @@ def main():
         if data["echipe"]:
             render_cards(ranking(data))
             st.caption("Forma ultimelor cinci meciuri: V = victorie · E = egal · Î = înfrângere")
-            st.markdown("#### Topuri jucători")
-            leaderboard_cols = st.columns(2)
-            for col, (title, field, label) in zip(leaderboard_cols * 2, (
-                    ("⚽ Marcatori", "goluri", "Goluri"),
-                    ("🎯 Assisturi", "asisturi", "Assisturi"),
-                    ("🟨 Cartonașe galbene", "cartonase_galbene", "Galbene"),
-                    ("🟥 Cartonașe roșii", "cartonase_rosii", "Roșii"))):
-                with col:
-                    st.markdown(f"**{title}**")
-                    leaderboard = player_leaderboard(data, field, label)
-                    if leaderboard:
-                        render_cards(leaderboard)
-                    else:
-                        st.caption("Încă nu există date pentru acest top.")
+        else:
+            st.info("Adaugă echipe pentru a vedea clasamentul.")
         with st.expander("Setări ligă"):
             rename = st.text_input("Denumire", value=data["nume_liga"], key="rename")
             if st.button("Salvează denumirea") and rename.strip():
@@ -2218,19 +2236,24 @@ def main():
                          )
 
     if page == "Statistici":
-        st.subheader("Clasament")
-        if data["echipe"]:
-            render_cards(ranking(data))
-        cols = st.columns(4)
-        for col, title, field in zip(cols, ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii"),
-                                     ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+        st.subheader("Statistici jucători")
+        st.caption("Clasamentele individuale se actualizează automat după înregistrarea meciurilor.")
+        stat_sections = (
+            ("⚽ Marcatori", "goluri", "Goluri"),
+            ("🎯 Assisturi", "asisturi", "Assisturi"),
+            ("🟨 Cartonașe galbene", "cartonase_galbene", "Galbene"),
+            ("🟥 Cartonașe roșii", "cartonase_rosii", "Roșii"),
+        )
+        stat_cols = st.columns(2)
+        for col, (title, field, label) in zip(stat_cols * 2, stat_sections):
             with col:
-                st.markdown(f"**{title}**")
-                rows = player_leaderboard(data, field, title)
-                if rows:
-                    render_cards(rows)
-                else:
-                    st.caption("Încă nu există date pentru acest top.")
+                with st.container(border=True):
+                    st.markdown(f"#### {title}")
+                    rows = player_leaderboard(data, field, label)
+                    if rows:
+                        render_cards(rows)
+                    else:
+                        st.caption("Încă nu există date pentru acest clasament.")
 
     if page == "Premii sezon":
         st.subheader("Premii de sezon")
