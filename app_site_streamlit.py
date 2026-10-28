@@ -2511,17 +2511,19 @@ def main():
         else:
             st.markdown(f"### 👤 {profile.get('nume') or username}")
             st.caption(f"@{username}")
-            if st.button("👤 Profilul meu", width="stretch", key="open_global_profile"):
-                st.session_state["show_account_profile"] = True
-                st.rerun()
-            if st.button("Deconectare", width="stretch"):
-                revoke_remembered_account(cookie_manager)
-                st.session_state.pop("user_key", None)
-                st.session_state.pop("active_league_role", None)
-                st.session_state.pop("entered_league", None)
-                st.session_state.pop("active_league_picker", None)
-                st.session_state.pop("show_account_profile", None)
-                st.rerun()
+            with st.container(key="sidebar_profile_action"):
+                if st.button("👤 Profilul meu", width="content", key="open_global_profile"):
+                    st.session_state["show_account_profile"] = True
+                    st.rerun()
+            with st.container(key="sidebar_logout_action"):
+                if st.button("Deconectare", width="content"):
+                    revoke_remembered_account(cookie_manager)
+                    st.session_state.pop("user_key", None)
+                    st.session_state.pop("active_league_role", None)
+                    st.session_state.pop("entered_league", None)
+                    st.session_state.pop("active_league_picker", None)
+                    st.session_state.pop("show_account_profile", None)
+                    st.rerun()
         st.divider()
     if st.session_state.get("show_account_profile") and not is_guest:
         if st.button("↩ Înapoi la aplicație"):
@@ -2612,10 +2614,11 @@ def main():
         chosen_key = entered_key
     else:
         with st.sidebar:
-            if st.button("↩ Schimbă liga", width="stretch"):
-                st.session_state.pop("entered_league", None)
-                st.session_state.pop("active_league_picker", None)
-                st.rerun()
+            with st.container(key="sidebar_change_league_action"):
+                if st.button("↩ Schimbă liga", width="content"):
+                    st.session_state.pop("entered_league", None)
+                    st.session_state.pop("active_league_picker", None)
+                    st.rerun()
             st.divider()
             st.markdown("**Liga activă**")
         labels_by_key = {league_key(item): label for label, item in by_label.items()}
@@ -2675,6 +2678,12 @@ def main():
     [data-testid="stSidebar"] [role="radiogroup"] > label {
       box-sizing: border-box; width: 100%; min-height: 46px; padding: 9px 12px;
       display: flex; align-items: center; border-radius: 10px;
+    }
+    .st-key-sidebar_profile_action button,
+    .st-key-sidebar_logout_action button,
+    .st-key-sidebar_change_league_action button {
+      min-height: 34px !important; height: 34px !important; padding: 5px 10px !important;
+      font-size: 0.86rem !important; line-height: 1.1 !important;
     }
     @media (max-width: 768px) {
       .st-key-sidebar_nav_desktop { display: none !important; }
