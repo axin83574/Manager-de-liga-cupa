@@ -1200,15 +1200,18 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                     if not teams:
                         st.info("Liga nu are încă echipe. Deocamdată poți rămâne spectator.")
                     else:
-                        with st.form("viewer_profile_link"):
-                            team = st.selectbox("Echipa ta", teams,
-                                index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0)
-                            players = list(data["echipe"][team].get("jucatori", {}))
-                            player = st.selectbox("Alege-ți jucătorul", players,
-                                index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0) if players else None
-                            if not players:
-                                st.caption("Echipa aleasă nu are încă jucători în lot.")
-                            save_link = st.form_submit_button("Salvează alegerea", type="primary", disabled=not bool(players))
+                        league_widget_id = f"{safe_slug(entry['owner'])}_{safe_slug(entry['path'].stem)}"
+                        team = st.selectbox("Echipa ta", teams,
+                            index=teams.index(prior["echipa"]) if prior.get("echipa") in teams else 0,
+                            key=f"viewer_team_{league_widget_id}")
+                        players = list(data["echipe"][team].get("jucatori", {}))
+                        player = st.selectbox("Alege-ți jucătorul", players,
+                            index=players.index(prior["jucator"]) if prior.get("jucator") in players else 0,
+                            key=f"viewer_player_{league_widget_id}_{safe_slug(team)}") if players else None
+                        if not players:
+                            st.caption("Echipa aleasă nu are încă jucători în lot.")
+                        save_link = st.button("Salvează alegerea", type="primary",
+                            disabled=not bool(players), key=f"save_viewer_player_{league_widget_id}")
                         if save_link and player:
                             try:
                                 save_code_member_choice(entry, username, team, player)
