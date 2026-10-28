@@ -2896,12 +2896,19 @@ def main():
                            "Schimbări": match_substitution_summary(m),
                            "Masa verde": "Da" if m.get("masa_verde") else ""}
                           for m in ordered_matches])
-            for match in ordered_matches:
-                with st.expander(f"📋 Istoric · {match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')} · etapa {match.get('etapa') or '—'}"):
-                    render_match_history_details(match)
-                with st.expander(f"⭐ Omul meciului · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
-                    render_motm_voting(data, match, path, username, profile,
-                                       widget_key=f"league-{league_key(selected_entry)}-{match.get('id')}")
+            st.markdown("#### Istoric meci și vot pentru omul meciului")
+            selected_history_match = st.selectbox(
+                "Alege un meci",
+                ordered_matches,
+                format_func=lambda m: f"Etapa {m.get('etapa') or '—'} · {m.get('e1')} {m.get('goluri_e1', 0)}–{m.get('goluri_e2', 0)} {m.get('e2')}",
+                key=f"history_match_{safe_slug(league_key(selected_entry))}")
+            if selected_history_match:
+                with st.container(border=True):
+                    render_match_history_details(selected_history_match)
+                    st.divider()
+                    st.markdown("##### ⭐ Votează omul meciului")
+                    render_motm_voting(data, selected_history_match, path, username, profile,
+                        widget_key=f"league-{league_key(selected_entry)}-{selected_history_match.get('id')}")
             with st.expander("Editează un rezultat"):
                 match_to_edit = st.selectbox("Meci de editat", data["istoric_meciuri"],
                     format_func=lambda m: f"{m.get('etapa') or '–'} · {m['e1']} {m['goluri_e1']}–{m['goluri_e2']} {m['e2']}",
