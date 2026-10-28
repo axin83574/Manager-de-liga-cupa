@@ -25,7 +25,7 @@ STATS_JUCATOR = {"goluri": 0, "asisturi": 0,
                  "cartonase_galbene": 0, "cartonase_rosii": 0}
 TIPURI_GOL = ("Gol Normal", "Gol din Lovitură Liberă", "Penalty")
 TIPURI_EVENIMENT = TIPURI_GOL + ("Autogol", "Penalty Ratat",
-                                 "Cartonaș Galben", "Cartonaș Roșu")
+                                 "Cartonaș Galben", "Cartonaș Roșu", "Schimbare")
 BASE_DIR = Path(os.environ.get("LIGA_DATA_DIR", Path(__file__).resolve().parent / "ligi"))
 APP_DIR = Path(__file__).resolve().parent
 USERS_FILE = Path(os.environ.get("LIGA_USERS_FILE", APP_DIR / "utilizatori.json"))
@@ -84,10 +84,18 @@ def normalizeaza_date(data):
     if not isinstance(settings, dict):
         settings = {}
     settings.setdefault("motm_voting_mode", "no_players")
+    settings.setdefault("award_voting_mode", "direct")
+    settings.setdefault("award_voting_open", False)
+    settings.setdefault("cup_leg_format", "single")
+    settings.setdefault("cup_tie_resolution", "penalties")
+    settings.setdefault("supercup_leg_format", "single")
+    settings.setdefault("supercup_tie_resolution", "penalties")
+    settings.setdefault("substitution_rule", "5_no_return")
     data["setari_liga"] = settings
     for key, default in (("echipe", {}), ("istoric_meciuri", []), ("program", []),
                          ("transferuri", []), ("cupe", []), ("invitatii", []), ("sterse", []),
-                         ("membri", []), ("selectii_membri", {}), ("premii_alese", {})):
+                         ("membri", []), ("selectii_membri", {}), ("premii_alese", {}),
+                         ("voturi_premii", {})):
         if not isinstance(data.get(key), type(default)):
             data[key] = copy.deepcopy(default)
     for team in data["echipe"].values():
@@ -113,11 +121,14 @@ def normalizeaza_date(data):
     for cup in data["cupe"]:
         cup.setdefault("id", uuid.uuid4().hex[:8])
         cup.setdefault("nume", "Cupa")
+        cup.setdefault("tur_retur", False)
         cup.setdefault("runde", [])
         cup.setdefault("status", "în desfășurare")
         cup.setdefault("castigatoare", None)
         for round_data in cup["runde"]:
             round_data.setdefault("nume", "Runda")
+            for slot in round_data.get("meciuri", []):
+                slot.setdefault("meci_retur", None)
             for slot in round_data.get("meciuri", []):
                 slot.setdefault("id", uuid.uuid4().hex[:8])
                 slot.setdefault("e1", None)
@@ -698,6 +709,8 @@ def build_match(home, away, events, round_no=None, walkover=None, reason=""):
     stats = {}
     for event in events:
         team_stats = stats.setdefault(event["echipa"], {})
+        if event.get("tip") == "Schimbare":
+            continue
         player_stats = team_stats.setdefault(event["jucator"], dict(STATS_JUCATOR))
         if event["tip"] in TIPURI_GOL:
             player_stats["goluri"] += 1
@@ -717,38 +730,95 @@ def build_match(home, away, events, round_no=None, walkover=None, reason=""):
     return match
 
 
-def render_match_event_entry(data, home, away, draft_id, initial_events=None):
+def match_substitution_summary(match):
+    substitutions = [event for event in match.get("evenimente", [])
+                     if event.get("tip") == "Schimbare"]
+    return " · ".join(f"{event.get('echipa')}: {event.get('jucator')} → {event.get('intra')}"
+                      for event in substitutions) or "–"
+
+
+def render_match_event_entry(data, home, away, draft_id, initial_events=None,
+                             minute_min=1, minute_max=150, substitution_history=None):
     """Interactive event entry with a live score preview."""
     state_key = f"match_draft_{draft_id}"
     events = st.session_state.setdefault(state_key, copy.deepcopy(initial_events or []))
     next_key = f"{state_key}_next"
     entry_id = st.session_state.get(next_key, 0)
     st.markdown("#### Evenimentele meciului")
-    st.caption("Adaugă fiecare gol sau cartonaș separat. Scorul se actualizează automat.")
+    st.caption("Adaugă goluri, cartonașe și schimbări. Scorul se actualizează automat; schimbările nu modifică statisticile de goluri.")
     left, right = st.columns([1, 1])
     with left:
-        minute = st.number_input("Minut", min_value=1, max_value=150, value=1,
+        minute = st.number_input("Minut", min_value=minute_min, max_value=minute_max, value=minute_min,
                                  step=1, key=f"{state_key}_minute_{entry_id}")
         event_team = st.selectbox("Echipa", [home, away], key=f"{state_key}_team_{entry_id}")
         event_type = st.selectbox("Eveniment", TIPURI_EVENIMENT, key=f"{state_key}_type_{entry_id}")
     roster = list(data.get("echipe", {}).get(event_team, {}).get("jucatori", {}))
     team_token = hashlib.sha1(event_team.encode()).hexdigest()[:6]
-    player_options = [*roster, "Alt jucător…"]
-    player_choice = st.selectbox("Jucător", player_options, key=f"{state_key}_player_{team_token}_{entry_id}")
-    player_name = (st.text_input("Numele jucătorului", key=f"{state_key}_player_manual_{team_token}_{entry_id}")
-                   if player_choice == "Alt jucător…" else player_choice)
+    rule = data.get("setari_liga", {}).get("substitution_rule", "5_no_return")
+    substitution_limit = 5 if rule.startswith("5_") else None
+    allow_reentry = rule in {"5_return", "unlimited_return"}
+    all_match_events = [*(substitution_history or []), *events]
+    team_subs = [event for event in all_match_events
+                 if event.get("tip") == "Schimbare" and event.get("echipa") == event_team]
+    team_sub_count = len(team_subs)
+    limit_reached = substitution_limit is not None and team_sub_count >= substitution_limit
+    player_name = ""
+    incoming_player = None
     assist = None
-    if event_type in TIPURI_GOL:
-        assist_options = ["Fără assist", *roster, "Alt jucător…"]
-        assist_choice = st.selectbox("Assist (opțional)", assist_options,
-                                     key=f"{state_key}_assist_{team_token}_{entry_id}")
-        if assist_choice == "Alt jucător…":
-            assist = st.text_input("Numele celui care a dat assist", key=f"{state_key}_assist_manual_{team_token}_{entry_id}").strip() or None
-        elif assist_choice != "Fără assist":
-            assist = assist_choice
-    if st.button("＋ Adaugă eveniment", type="primary", key=f"{state_key}_add_{entry_id}"):
+    if event_type == "Schimbare":
+        if limit_reached:
+            st.info("Echipa a folosit deja toate cele cinci schimbări permise în acest meci.")
+        elif len(roster) < 2:
+            st.info("Adaugă cel puțin doi jucători în lotul echipei pentru a înregistra o schimbare.")
+        else:
+            already_out = {event.get("jucator") for event in team_subs if event.get("jucator")}
+            outgoing_options = [player for player in roster if allow_reentry or player not in already_out]
+            if not outgoing_options:
+                st.info("Nu mai sunt jucători eligibili pentru a ieși; cei schimbați nu pot reintra.")
+            else:
+                player_name = st.selectbox("Jucător care iese", outgoing_options,
+                    key=f"{state_key}_out_{team_token}_{entry_id}")
+                incoming_options = [player for player in roster if player != player_name
+                    and (allow_reentry or player not in already_out)]
+                if incoming_options:
+                    incoming_player = st.selectbox("Jucător care intră", incoming_options,
+                        key=f"{state_key}_in_{team_token}_{entry_id}")
+                else:
+                    st.info("Nu există un alt jucător eligibil care să intre.")
+    else:
+        player_options = [*roster, "Alt jucător…"]
+        player_choice = st.selectbox("Jucător", player_options,
+            key=f"{state_key}_player_{team_token}_{entry_id}")
+        player_name = (st.text_input("Numele jucătorului", key=f"{state_key}_player_manual_{team_token}_{entry_id}")
+                       if player_choice == "Alt jucător…" else player_choice)
+        if event_type in TIPURI_GOL:
+            assist_options = ["Fără assist", *roster, "Alt jucător…"]
+            assist_choice = st.selectbox("Assist (opțional)", assist_options,
+                                         key=f"{state_key}_assist_{team_token}_{entry_id}")
+            if assist_choice == "Alt jucător…":
+                assist = st.text_input("Numele celui care a dat assist", key=f"{state_key}_assist_manual_{team_token}_{entry_id}").strip() or None
+            elif assist_choice != "Fără assist":
+                assist = assist_choice
+    disabled_add = event_type == "Schimbare" and (
+        limit_reached or len(roster) < 2 or not player_name or not incoming_player)
+    if st.button("＋ Adaugă eveniment", type="primary", disabled=disabled_add,
+                 key=f"{state_key}_add_{entry_id}"):
         player_name = player_name.strip()
-        if not player_name:
+        if event_type == "Schimbare":
+            if not player_name or not incoming_player or player_name == incoming_player:
+                st.error("Alege jucătorii care ies și intră.")
+            elif not allow_reentry and player_name in already_out:
+                st.error("Jucătorul a ieșit deja și nu mai poate fi schimbat din nou în acest meci.")
+            elif not allow_reentry and incoming_player in already_out:
+                st.error("Jucătorul care a ieșit mai devreme nu mai poate reintra.")
+            elif substitution_limit is not None and len(team_subs) >= substitution_limit:
+                st.error("Echipa a folosit deja toate cele cinci schimbări permise.")
+            else:
+                events.append({"echipa": event_team, "minut": int(minute), "tip": event_type,
+                               "jucator": player_name, "intra": incoming_player})
+                st.session_state[next_key] = st.session_state.get(next_key, 0) + 1
+                st.rerun()
+        elif not player_name:
             st.error("Alege sau scrie numele jucătorului.")
         elif assist and assist.casefold() == player_name.casefold():
             st.error("Marcatorul nu poate să-și dea assist lui însuși.")
@@ -762,7 +832,10 @@ def render_match_event_entry(data, home, away, draft_id, initial_events=None):
     if events:
         st.markdown("**Evenimente adăugate**")
         for index, event in enumerate(list(events)):
-            detail = f"{event['minut']}′ · {event['echipa']} · {event['tip']} · {event['jucator']}"
+            if event.get("tip") == "Schimbare":
+                detail = f"{event['minut']}′ · {event['echipa']} · Schimbare: {event.get('jucator')}  →  {event.get('intra', '—')}"
+            else:
+                detail = f"{event['minut']}′ · {event['echipa']} · {event['tip']} · {event['jucator']}"
             if event.get("asist"):
                 detail += f" (assist: {event['asist']})"
             c1, c2 = st.columns([8, 1])
@@ -775,12 +848,63 @@ def render_match_event_entry(data, home, away, draft_id, initial_events=None):
     return events
 
 
+def render_knockout_result_entry(data, home, away, draft_id, tie_resolution,
+                                 aggregate_before=(0, 0), decide=True,
+                                 button_label="Salvează rezultatul", button_key=None):
+    """Collect regulation and optional extra-time events, then resolve the tie."""
+    st.caption("Introdu golurile din minutele regulamentare (1–90).")
+    regular_events = render_match_event_entry(data, home, away, draft_id,
+                                               minute_min=1, minute_max=90)
+    regular_match = build_match(home, away, regular_events)
+    regular_home_total = aggregate_before[0] + regular_match["goluri_e1"]
+    regular_away_total = aggregate_before[1] + regular_match["goluri_e2"]
+    regular_tied = regular_home_total == regular_away_total
+    if aggregate_before != (0, 0):
+        st.markdown(f"**Scor agregat după 90′:** {home} {regular_home_total} – {regular_away_total} {away}")
+    extra_events = []
+    if decide and regular_tied and tie_resolution == "extra_time":
+        st.info("Egalitate după minutele regulamentare. Se joacă două reprize de prelungiri (minutele 91–120).")
+        extra_events = render_match_event_entry(data, home, away, f"{draft_id}_extra",
+                                                 minute_min=91, minute_max=120,
+                                                 substitution_history=regular_events)
+    final_events = [*regular_events, *extra_events]
+    final_match = build_match(home, away, final_events)
+    final_home_total = aggregate_before[0] + final_match["goluri_e1"]
+    final_away_total = aggregate_before[1] + final_match["goluri_e2"]
+    if decide and regular_tied:
+        if tie_resolution == "extra_time":
+            score_label = "Scor după prelungiri/agregat"
+        elif aggregate_before != (0, 0):
+            score_label = "Scor agregat înainte de penaltyuri"
+        else:
+            score_label = "Scor după minutele regulamentare"
+        st.markdown(f"**{score_label}:** {final_home_total} – {final_away_total}")
+        needs_penalties = final_home_total == final_away_total
+    else:
+        needs_penalties = False
+    penalty_winner = None
+    if needs_penalties:
+        st.caption("Egalitate în continuare. Alege echipa care se califică după penaltyuri.")
+        penalty_winner = st.selectbox("Câștigătoare la penaltyuri", [home, away],
+                                      key=f"{draft_id}_penalty_winner")
+    submitted = st.button(button_label, type="primary", key=button_key or f"{draft_id}_save")
+    if not submitted:
+        return None, None, False, False
+    if not decide:
+        return final_match, None, False, True
+    if needs_penalties:
+        winner = penalty_winner
+    else:
+        winner = home if final_home_total > final_away_total else away
+    return final_match, winner, needs_penalties, True
+
+
 def round_title(match_count):
     return {1: "Finala", 2: "Semifinale", 4: "Sferturi", 8: "Optimi",
             16: "Șaisprezecimi"}.get(match_count, f"Runda cu {match_count} meciuri")
 
 
-def make_cup(teams, name):
+def make_cup(teams, name, tur_retur=False):
     shuffled = list(teams)
     import random
     random.shuffle(shuffled)
@@ -804,6 +928,7 @@ def make_cup(teams, name):
             slot["e1"], slot["e2"] = shuffled[cursor:cursor + 2]
             cursor += 2
     cup = {"id": uuid.uuid4().hex[:8], "nume": name, "echipe": list(teams),
+           "tur_retur": bool(tur_retur),
            "creata": dt.date.today().strftime("%d.%m.%Y"), "runde": rounds,
            "status": "în desfășurare", "castigatoare": None}
     propagate_cup_byes(cup)
@@ -833,8 +958,9 @@ def participanti_supercupa(data, cup):
         cup_winner, teams[1], "locul 2 din ligă (dubla ligă + cupă)")
 
 
-def make_supercup(name, team_a, team_b, source_cup_id=None):
+def make_supercup(name, team_a, team_b, source_cup_id=None, tur_retur=False):
     return {"id": uuid.uuid4().hex[:8], "nume": name, "super": True,
+            "tur_retur": bool(tur_retur),
             "sursa_cupa": source_cup_id, "echipe": [team_a, team_b],
             "creata": dt.date.today().strftime("%d.%m.%Y"),
             "runde": [{"nume": "Finala", "meciuri": [{"id": uuid.uuid4().hex[:8],
@@ -867,18 +993,255 @@ def definitii_premii(data):
     return awards
 
 
+def award_is_automatic(award):
+    return award.get("cheie") in {"campioana", "gheata_liga", "gheata_cupa"} or str(
+        award.get("cheie", "")).startswith("cupa:")
+
+
+def event_totals(matches):
+    result = {}
+    for played_match in matches:
+        for event in played_match.get("evenimente", []):
+            player_name = event.get("jucator")
+            if not player_name or event.get("tip") not in TIPURI_GOL:
+                continue
+            key = (event.get("echipa") or "", player_name)
+            totals = result.setdefault(key, {"goluri": 0, "asisturi": 0})
+            totals["goluri"] += 1
+            assist_name = event.get("asist")
+            if assist_name:
+                result.setdefault((key[0], assist_name), {"goluri": 0, "asisturi": 0})["asisturi"] += 1
+    return result
+
+
+def final_player_identity(data, team, player):
+    visited = {team}
+    while True:
+        transfer = next((item for item in reversed(data.get("transferuri", []))
+                         if item.get("de_la") == team
+                         and str(item.get("jucator", "")).casefold() == player.casefold()), None)
+        if not transfer or transfer.get("la") in visited:
+            return team, player
+        team, player = transfer["la"], transfer.get("nume_nou", player)
+        visited.add(team)
+
+
+def automatic_award_winners(data, award):
+    key = award.get("cheie", "")
+    if key == "campioana":
+        table = ranking(data)
+        return [(table[0]["Echipă"], "")] if table else []
+    if key.startswith("cupa:"):
+        cup_id = key.split(":", 1)[1]
+        cup = next((item for item in data.get("cupe", []) if str(item.get("id")) == cup_id), None)
+        winner = cup.get("castigatoare") if cup else None
+        return [(winner, "")] if winner else []
+    if key in ("gheata_liga", "gheata_cupa"):
+        if key == "gheata_liga":
+            matches = data.get("istoric_meciuri", [])
+        else:
+            matches = [match for cup in data.get("cupe", []) if not cup.get("super")
+                for round_data in cup.get("runde", []) for slot in round_data.get("meciuri", [])
+                for match in (slot.get("meci"), slot.get("meci_retur")) if match]
+        raw_totals = event_totals(matches)
+        totals = {}
+        for (team, player), stats in raw_totals.items():
+            identity = final_player_identity(data, team, player)
+            if identity[0] in data.get("echipe", {}) and identity[1] in data["echipe"][identity[0]].get("jucatori", {}):
+                totals[identity] = totals.get(identity, 0) + stats["goluri"]
+        best = max(totals.values(), default=0)
+        return sorted(candidate for candidate, goals in totals.items() if best > 0 and goals == best)
+    return []
+
+
+def award_winners(data, award):
+    if award_is_automatic(award):
+        return automatic_award_winners(data, award)
+    selected = data.get("premii_alese", {}).get(award["cheie"], {})
+    if award["tip"] == "echipa":
+        return [(selected.get("echipa"), "")] if selected.get("echipa") else []
+    return [(selected.get("echipa"), selected.get("jucator"))] if selected.get("echipa") and selected.get("jucator") else []
+
+
+def award_candidates(data, award):
+    candidates = [(team, player) for team, info in data.get("echipe", {}).items()
+                  for player in info.get("jucatori", {})]
+    target_position = award.get("poz")
+    if target_position:
+        candidates.sort(key=lambda choice: (
+            0 if target_position in str(data["echipe"].get(choice[0], {}).get("jucatori", {})
+                                        .get(choice[1], {}).get("pozitie", "")).casefold() else 1,
+            choice[1].casefold(), choice[0].casefold()))
+    else:
+        candidates.sort(key=lambda choice: (choice[1].casefold(), choice[0].casefold()))
+    return candidates
+
+
+def award_voter_id(username=None, guest_invite=None):
+    if username:
+        identity = f"user:{username.casefold()}"
+    elif guest_invite:
+        invitation = guest_invite.get("invitation", {})
+        identity = f"invite:{invitation.get('id')}"
+    else:
+        return None
+    return "award-voter:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def award_vote_scores(data, award_key):
+    scores = {}
+    all_ballots = data.get("voturi_premii", {})
+    if not isinstance(all_ballots, dict):
+        return scores
+    ballots = all_ballots.get(award_key, {})
+    if not isinstance(ballots, dict):
+        return scores
+    award = next((item for item in definitii_premii(data)
+                  if item["cheie"] == award_key and item["tip"] == "jucator"), None)
+    valid_candidates = set(award_candidates(data, award)) if award else set()
+    for ballot in ballots.values():
+        choices = ballot.get("alegeri", []) if isinstance(ballot, dict) else ballot
+        if not isinstance(choices, list):
+            continue
+        for place, choice in enumerate(choices[:5]):
+            if isinstance(choice, dict):
+                candidate = (choice.get("echipa"), choice.get("jucator"))
+            elif isinstance(choice, (list, tuple)) and len(choice) == 2:
+                candidate = tuple(choice)
+            else:
+                continue
+            if candidate in valid_candidates:
+                scores[candidate] = scores.get(candidate, 0) + (5 - place)
+    return scores
+
+
+def finalize_award_vote_results(data):
+    awards = [award for award in definitii_premii(data)
+              if award["tip"] == "jucator" and not award_is_automatic(award)]
+    selected = data.setdefault("premii_alese", {})
+    for award in awards:
+        scores = award_vote_scores(data, award["cheie"])
+        best = max(scores.values(), default=0)
+        winners = [candidate for candidate, points in scores.items() if points == best and best > 0]
+        if len(winners) == 1:
+            team, player = winners[0]
+            selected[award["cheie"]] = {"echipa": team, "jucator": player,
+                "puncte_vot": best, "modificat": int(dt.datetime.now().timestamp() * 1000)}
+        else:
+            selected.pop(award["cheie"], None)
+
+
+def save_award_ballot(path, award_key, choices, username=None, guest_invite=None):
+    fresh = load_league(path)
+    settings = fresh.get("setari_liga", {})
+    if settings.get("award_voting_mode", "direct") != "vote" or not settings.get("award_voting_open"):
+        raise ValueError("Votul pentru premii nu este deschis.")
+    award = next((item for item in definitii_premii(fresh)
+                  if item["cheie"] == award_key and item["tip"] == "jucator"
+                  and not award_is_automatic(item)), None)
+    if not award:
+        raise ValueError("Premiul selectat nu mai există.")
+    voter_id = award_voter_id(username, guest_invite)
+    if not voter_id:
+        raise ValueError("Intră în ligă cu un cont sau o invitație pentru a vota.")
+    if username:
+        owner = Path(path).parent.name.casefold()
+        member = next((item for item in fresh.get("membri", [])
+            if str(item.get("username", "")).casefold() == username.casefold()
+            and item.get("activ", True)), None)
+        if owner != username.casefold() and not member:
+            raise ValueError("Nu mai ai acces la această ligă.")
+    else:
+        invitation = guest_invite.get("invitation", {})
+        active = next((item for item in fresh.get("invitatii", [])
+            if item.get("id") == invitation.get("id")
+            and hmac.compare_digest(str(item.get("token", "")), str(invitation.get("token", "")))
+            and item.get("activ", True)), None)
+        if not active:
+            raise ValueError("Invitația nu mai este activă.")
+    candidates = set(award_candidates(fresh, award))
+    normalized = [tuple(choice) for choice in choices]
+    if len(normalized) != 5 or len(set(normalized)) != 5:
+        raise ValueError("Alege exact cinci jucători diferiți, în ordinea preferinței.")
+    if any(choice not in candidates for choice in normalized):
+        raise ValueError("Unul dintre jucătorii aleși nu mai este eligibil pentru acest premiu.")
+    all_ballots = fresh.get("voturi_premii")
+    if not isinstance(all_ballots, dict):
+        all_ballots = fresh["voturi_premii"] = {}
+    award_ballots = all_ballots.get(award_key)
+    if not isinstance(award_ballots, dict):
+        award_ballots = all_ballots[award_key] = {}
+    award_ballots[voter_id] = {
+        "alegeri": [{"echipa": team, "jucator": player} for team, player in normalized],
+        "trimis": int(dt.datetime.now().timestamp() * 1000)}
+    _store_league(path, fresh)
+
+
+def render_award_ballot(data, award, path, username=None, guest_invite=None, widget_key=""):
+    if award.get("tip") != "jucator" or award_is_automatic(award):
+        return
+    settings = data.get("setari_liga", {})
+    if settings.get("award_voting_mode", "direct") != "vote":
+        return
+    candidates = award_candidates(data, award)
+    st.markdown(f"##### Vot pentru {award['titlu']}")
+    if len(candidates) < 5:
+        st.info("Sunt necesari cel puțin cinci jucători eligibili pentru acest vot.")
+        return
+    voter_id = award_voter_id(username, guest_invite)
+    if not voter_id:
+        st.info("Intră în cont sau accesează liga prin invitație pentru a vota.")
+        return
+    ballots = data.get("voturi_premii", {}).get(award["cheie"], {})
+    previous = ballots.get(voter_id, {}) if isinstance(ballots, dict) else {}
+    previous_choices = previous.get("alegeri", []) if isinstance(previous, dict) else []
+    if not settings.get("award_voting_open"):
+        st.info("Votul este închis de proprietarul sau editorul ligii.")
+        scores = award_vote_scores(data, award["cheie"])
+        if scores:
+            ordered_scores = sorted(scores.items(), key=lambda item: (-item[1], item[0][1].casefold(), item[0][0].casefold()))
+            render_cards([{"Loc": index + 1, "Jucător": player, "Echipă": team, "Puncte": score}
+                          for index, ((team, player), score) in enumerate(ordered_scores)])
+            best = ordered_scores[0][1]
+            winners = [f"{player} · {team}" for (team, player), score in ordered_scores if score == best]
+            st.caption(f"Câștigător: {' / '.join(winners)} · {best} puncte" if len(winners) == 1
+                       else f"Egalitate la primul loc · {best} puncte")
+        return
+    st.caption("Alege cinci jucători în ordinea preferinței: locul 1 primește 5 puncte, apoi 4, 3, 2 și 1.")
+    labels = {choice: f"{choice[1]} · {choice[0]}" for choice in candidates}
+    ballot_key = safe_slug(widget_key or award["cheie"])
+    with st.form(f"award_ballot_{ballot_key}"):
+        choices = []
+        for index in range(5):
+            saved = previous_choices[index] if index < len(previous_choices) else {}
+            saved_choice = (saved.get("echipa"), saved.get("jucator")) if isinstance(saved, dict) else None
+            default_index = candidates.index(saved_choice) if saved_choice in candidates else index
+            choices.append(st.selectbox(f"Locul {index + 1} · {5 - index} puncte", candidates,
+                index=default_index, format_func=lambda choice: labels[choice],
+                key=f"{ballot_key}_rank_{index}"))
+        submit = st.form_submit_button("Salvează votul", type="primary")
+    if submit:
+        if len(set(choices)) != 5:
+            st.error("Alege cinci jucători diferiți.")
+        else:
+            try:
+                save_award_ballot(path, award["cheie"], choices, username, guest_invite)
+                st.success("Votul a fost salvat. Îl poți modifica până la închiderea votului.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Nu am putut salva votul: {exc}")
+    st.caption(f"Voturi înregistrate: {len(ballots) if isinstance(ballots, dict) else 0}")
+
+
 def trofee_echipa(data, team):
-    chosen = data.get("premii_alese", {})
     return [award["trofeu"] for award in definitii_premii(data)
-            if award["tip"] == "echipa" and (chosen.get(award["cheie"]) or {}).get("echipa") == team]
+            if award["tip"] == "echipa" and any(winner_team == team
+                for winner_team, _ in award_winners(data, award))]
 
 
 def trofee_jucator(data, team, player):
-    chosen = data.get("premii_alese", {})
     return [award["trofeu"] for award in definitii_premii(data)
-            if award["tip"] == "jucator" and
-            (chosen.get(award["cheie"]) or {}).get("echipa") == team and
-            (chosen.get(award["cheie"]) or {}).get("jucator") == player]
+            if award["tip"] == "jucator" and (team, player) in award_winners(data, award)]
 
 
 def propagate_cup_byes(cup):
@@ -896,7 +1259,10 @@ def clear_cup_result(cup, round_index, match_index):
         slot = cup["runde"][round_index]["meciuri"][match_index]
         if slot.get("meci"):
             removed.append(slot["meci"])
-        slot["meci"], slot["castigator"], slot["penalti"] = None, None, False
+        if slot.get("meci_retur"):
+            removed.append(slot["meci_retur"])
+        slot["meci"], slot["meci_retur"] = None, None
+        slot["castigator"], slot["penalti"] = None, False
         if round_index + 1 >= len(cup["runde"]):
             break
         next_slot = cup["runde"][round_index + 1]["meciuri"][match_index // 2]
@@ -979,8 +1345,9 @@ def rename_team(data, old_name, new_name):
                 if slot.get("e1") == old_name: slot["e1"] = new_name
                 if slot.get("e2") == old_name: slot["e2"] = new_name
                 if slot.get("castigator") == old_name: slot["castigator"] = new_name
-                match = slot.get("meci")
-                if match:
+                for match in (slot.get("meci"), slot.get("meci_retur")):
+                    if not match:
+                        continue
                     if match.get("e1") == old_name: match["e1"] = new_name
                     if match.get("e2") == old_name: match["e2"] = new_name
                     if match.get("masa_verde") == old_name: match["masa_verde"] = new_name
@@ -1020,10 +1387,10 @@ def rebuild_stats(data):
     for cup in data.get("cupe", []):
         for round_data in cup.get("runde", []):
             for slot in round_data.get("meciuri", []):
-                match = slot.get("meci")
-                if match:
-                    apply_player_stats(data, match["e1"], match.get("mod_e1", {}))
-                    apply_player_stats(data, match["e2"], match.get("mod_e2", {}))
+                for match in (slot.get("meci"), slot.get("meci_retur")):
+                    if match:
+                        apply_player_stats(data, match["e1"], match.get("mod_e1", {}))
+                        apply_player_stats(data, match["e2"], match.get("mod_e2", {}))
 
 
 def generate_rounds(teams, home_away=False):
@@ -1157,8 +1524,9 @@ def _match_records(data):
     for cup in data.get("cupe", []):
         for round_data in cup.get("runde", []):
             for slot in round_data.get("meciuri", []):
-                if slot.get("meci"):
-                    yield slot["meci"]
+                for match in (slot.get("meci"), slot.get("meci_retur")):
+                    if match:
+                        yield match
 
 
 def motm_wins_for_player(data, team, player):
@@ -1374,7 +1742,8 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     with t3:
         ordered_matches = ordered_by_stage(data.get("istoric_meciuri", []))
         render_cards([{"Etapa": m.get("etapa") or "–", "Gazdă": m.get("e1"),
-            "Scor": f"{m.get('goluri_e1', 0)} – {m.get('goluri_e2', 0)}", "Oaspeți": m.get("e2")}
+            "Scor": f"{m.get('goluri_e1', 0)} – {m.get('goluri_e2', 0)}", "Oaspeți": m.get("e2"),
+            "Schimbări": match_substitution_summary(m)}
             for m in ordered_matches])
         for match in ordered_matches:
             with st.expander(f"⭐ Votează · {match.get('e1')} – {match.get('e2')} · {match.get('etapa') or 'fără etapă'}"):
@@ -1395,23 +1764,47 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 for slot in round_data.get("meciuri", []):
                     match = slot.get("meci")
                     if match:
-                        st.write(f"{match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']} · câștigă {slot.get('castigator')}")
+                        substitutions = match_substitution_summary(match)
+                        if substitutions != "–":
+                            st.caption(f"Schimbări: {substitutions}")
+                        if cup.get("tur_retur"):
+                            st.write(f"Tur: {match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']}")
+                            returned = slot.get("meci_retur")
+                            if returned:
+                                substitutions = match_substitution_summary(returned)
+                                if substitutions != "–":
+                                    st.caption(f"Schimbări retur: {substitutions}")
+                                aggregate_home = match["goluri_e1"] + returned["goluri_e2"]
+                                aggregate_away = match["goluri_e2"] + returned["goluri_e1"]
+                                st.write(f"Retur: {returned['e1']} {returned['goluri_e1']} – {returned['goluri_e2']} {returned['e2']}")
+                                st.caption(f"Scor agregat {match['e1']} {aggregate_home} – {aggregate_away} {match['e2']} · se califică {slot.get('castigator') or 'urmează returul'}")
+                                render_motm_voting(data, returned, entry["path"], username, profile, guest_invite,
+                                    widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}")
+                            else:
+                                st.caption("Returul urmează.")
+                        else:
+                            st.write(f"{match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']} · câștigă {slot.get('castigator')}")
                         render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
                             widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
                     else:
                         st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
     with tabs[5]:
         awards = []
-        selected_awards = data.get("premii_alese", {})
         for award in definitii_premii(data):
-            selected = selected_awards.get(award["cheie"], {})
+            winners = award_winners(data, award)
             if award["tip"] == "echipa":
-                winner_text = selected.get("echipa", "")
+                winner_text = " / ".join(team for team, _ in winners)
             else:
-                winner_text = (f"{selected.get('jucator')} · {selected.get('echipa')}"
-                               if selected.get("jucator") else "")
+                winner_text = " / ".join(f"{player} · {team}" for team, player in winners)
             awards.append({"Premiu": award["titlu"], "Câștigător": winner_text or "Neacordat"})
         render_cards(awards)
+        if data.get("setari_liga", {}).get("award_voting_mode", "direct") == "vote":
+            st.markdown("### Voturile pentru premiile individuale")
+            for award in definitii_premii(data):
+                if award["tip"] == "jucator" and not award_is_automatic(award):
+                    with st.container(border=True):
+                        render_award_ballot(data, award, entry["path"], username, guest_invite,
+                            widget_key=f"viewer-{league_key(entry)}-{award['cheie']}")
     if can_choose_player:
         with tabs[6]:
             teams = list(data.get("echipe", {}))
@@ -2168,7 +2561,7 @@ def main():
                          guest_entry if guest_entry and guest_entry.get("access_method") == "legacy" else None,
                          guest_profile)
         return
-    pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
+    pages = ["Clasament", "Setări ligă", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
             "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export"]
     if is_guest and guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
         pages.insert(-1, "Alegerea mea")
@@ -2179,6 +2572,7 @@ def main():
         pages,
         format_func=lambda item: {
             "Clasament": "🏆  Clasament",
+            "Setări ligă": "⚙  Setări ligă",
             "Echipe și jucători": "🛡  Echipe și jucători",
             "Meciuri și program": "⚽  Meciuri și program",
             "Cupa": "🥇  Cupa",
@@ -2208,26 +2602,129 @@ def main():
             st.caption("Forma ultimelor cinci meciuri: V = victorie · E = egal · Î = înfrângere")
         else:
             st.info("Adaugă echipe pentru a vedea clasamentul.")
-        with st.expander("Setări ligă"):
-            rename = st.text_input("Denumire", value=data["nume_liga"], key="rename")
-            if st.button("Salvează denumirea") and rename.strip():
-                data["nume_liga"] = rename.strip(); save_league(path, data); st.rerun()
-            st.markdown("**Votul pentru omul meciului**")
-            voting_modes = {
-                "Spectatorii votează; jucătorii echipelor din meci nu votează": "no_players",
-                "Toți pot vota; jucătorii nu se pot vota pe ei": "no_self_vote",
-            }
-            current_mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
-            current_label = next((label for label, value in voting_modes.items()
-                                  if value == current_mode), next(iter(voting_modes)))
-            selected_mode_label = st.selectbox(
-                "Cine poate vota?", list(voting_modes), index=list(voting_modes).index(current_label),
-                key="motm_voting_mode_select")
-            if st.button("Salvează setările votului", key="save_motm_voting_settings"):
-                data.setdefault("setari_liga", {})["motm_voting_mode"] = voting_modes[selected_mode_label]
-                save_league(path, data)
-                st.success("Setarea votului pentru omul meciului a fost salvată.")
-                st.rerun()
+
+
+    if page == "Setări ligă":
+        st.subheader("Setări ligă")
+        settings_widget_id = safe_slug(league_key(selected_entry))
+        rename = st.text_input("Denumire", value=data["nume_liga"], key=f"rename_{settings_widget_id}")
+        if st.button("Salvează denumirea") and rename.strip():
+            data["nume_liga"] = rename.strip(); save_league(path, data); st.rerun()
+        st.markdown("**Votul pentru omul meciului**")
+        voting_modes = {
+            "Spectatorii votează; jucătorii echipelor din meci nu votează": "no_players",
+            "Toți pot vota; jucătorii nu se pot vota pe ei": "no_self_vote",
+        }
+        current_mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
+        current_label = next((label for label, value in voting_modes.items()
+                              if value == current_mode), next(iter(voting_modes)))
+        selected_mode_label = st.selectbox(
+            "Cine poate vota?", list(voting_modes), index=list(voting_modes).index(current_label),
+            key=f"motm_voting_mode_select_{settings_widget_id}")
+        if st.button("Salvează setările votului", key=f"save_motm_voting_settings_{settings_widget_id}"):
+            data.setdefault("setari_liga", {})["motm_voting_mode"] = voting_modes[selected_mode_label]
+            save_league(path, data)
+            st.success("Setarea votului pentru omul meciului a fost salvată.")
+            st.rerun()
+        st.divider()
+        st.markdown("**Premii de final de sezon**")
+        award_modes = {"Alegere directă de către proprietar/editor": "direct",
+                       "Vot cu punctaj pentru jucători": "vote"}
+        current_award_mode = data.get("setari_liga", {}).get("award_voting_mode", "direct")
+        current_award_label = next((label for label, value in award_modes.items()
+                                    if value == current_award_mode), "Alegere directă de către proprietar/editor")
+        selected_award_label = st.selectbox("Metoda de acordare a premiilor individuale",
+            list(award_modes), index=list(award_modes).index(current_award_label),
+            key=f"award_voting_mode_select_{settings_widget_id}")
+        if st.button("Salvează metoda premiilor", key=f"save_award_voting_mode_{settings_widget_id}"):
+            selected_mode = award_modes[selected_award_label]
+            settings = data.setdefault("setari_liga", {})
+            if selected_mode == "direct" and settings.get("award_voting_open"):
+                settings["award_voting_open"] = False
+                finalize_award_vote_results(data)
+            elif selected_mode == "vote" and current_award_mode != "vote":
+                for award in definitii_premii(data):
+                    if award["tip"] == "jucator" and not award_is_automatic(award):
+                        data.setdefault("premii_alese", {}).pop(award["cheie"], None)
+            settings["award_voting_mode"] = selected_mode
+            save_league(path, data)
+            st.success("Metoda de acordare a premiilor a fost salvată.")
+            st.rerun()
+        if current_award_mode == "vote":
+            if data.get("setari_liga", {}).get("award_voting_open"):
+                st.success("Votul pentru premiile de sezon este deschis.")
+                if st.button("Închide votul și calculează câștigătorii", key=f"close_award_voting_{settings_widget_id}"):
+                    data.setdefault("setari_liga", {})["award_voting_open"] = False
+                    finalize_award_vote_results(data)
+                    save_league(path, data)
+                    st.success("Votul a fost închis și punctajele au fost calculate.")
+                    st.rerun()
+            else:
+                st.info("Votul este închis. Membrii ligii nu pot vota până nu îl activezi.")
+                if st.button("Deschide votul pentru premii", type="primary", key=f"open_award_voting_{settings_widget_id}"):
+                    data.setdefault("setari_liga", {})["award_voting_open"] = True
+                    save_league(path, data)
+                    st.success("Votul pentru premiile de sezon este deschis.")
+                    st.rerun()
+        st.divider()
+        st.markdown("**Schimbări în meciuri**")
+        substitution_rules = {
+            "5 schimbări pe meci · cine iese nu mai intră": "5_no_return",
+            "5 schimbări pe meci · cine iese mai poate intra": "5_return",
+            "Schimbări nelimitate · cine iese nu mai intră": "unlimited_no_return",
+            "Schimbări nelimitate · cine iese mai poate intra": "unlimited_return",
+        }
+        current_substitution_rule = data.get("setari_liga", {}).get("substitution_rule", "5_no_return")
+        current_substitution_label = next((label for label, value in substitution_rules.items()
+            if value == current_substitution_rule), next(iter(substitution_rules)))
+        selected_substitution_label = st.selectbox("Regula schimbărilor", list(substitution_rules),
+            index=list(substitution_rules).index(current_substitution_label),
+            key=f"substitution_rule_{settings_widget_id}")
+        st.caption("Limita de cinci schimbări se aplică separat fiecărei echipe și include prelungirile.")
+        if st.button("Salvează regula schimbărilor", key=f"save_substitution_rule_{settings_widget_id}"):
+            data.setdefault("setari_liga", {})["substitution_rule"] = substitution_rules[selected_substitution_label]
+            save_league(path, data)
+            st.success("Regula schimbărilor a fost salvată.")
+            st.rerun()
+        st.divider()
+        st.markdown("**Formatul cupelor eliminatorii**")
+        cup_leg_options = {"Un singur meci": "single", "Tur și retur": "home_away"}
+        current_leg_format = data.get("setari_liga", {}).get("cup_leg_format", "single")
+        selected_leg_label = st.selectbox("Format pentru cupele noi",
+            list(cup_leg_options),
+            index=list(cup_leg_options.values()).index(current_leg_format)
+                if current_leg_format in cup_leg_options.values() else 0,
+            key=f"cup_leg_format_select_{settings_widget_id}")
+        current_super_leg = data.get("setari_liga", {}).get("supercup_leg_format", "single")
+        selected_super_leg_label = st.selectbox("Format pentru Supercupele noi",
+            list(cup_leg_options),
+            index=list(cup_leg_options.values()).index(current_super_leg)
+                if current_super_leg in cup_leg_options.values() else 0,
+            key=f"supercup_leg_format_select_{settings_widget_id}")
+        cup_tie_options = {"Direct la penaltyuri": "penalties",
+                           "Două reprize de prelungiri, apoi penaltyuri dacă e egal": "extra_time"}
+        current_cup_tie = data.get("setari_liga", {}).get("cup_tie_resolution", "penalties")
+        selected_cup_tie = st.selectbox("Dacă egalitatea persistă în cupă",
+            list(cup_tie_options),
+            index=list(cup_tie_options.values()).index(current_cup_tie)
+                if current_cup_tie in cup_tie_options.values() else 0,
+            key=f"cup_tie_resolution_select_{settings_widget_id}")
+        current_super_tie = data.get("setari_liga", {}).get("supercup_tie_resolution", "penalties")
+        selected_super_tie = st.selectbox("Dacă finala Supercupei se termină egal",
+            list(cup_tie_options),
+            index=list(cup_tie_options.values()).index(current_super_tie)
+                if current_super_tie in cup_tie_options.values() else 0,
+            key=f"supercup_tie_resolution_select_{settings_widget_id}")
+        st.caption("Formatele se aplică competițiilor noi. Pentru o cupă sau Supercupă existentă, formatul se poate schimba înainte de primul rezultat.")
+        if st.button("Salvează setările cupelor", key=f"save_cup_settings_{settings_widget_id}"):
+            settings = data.setdefault("setari_liga", {})
+            settings["cup_leg_format"] = cup_leg_options[selected_leg_label]
+            settings["supercup_leg_format"] = cup_leg_options[selected_super_leg_label]
+            settings["cup_tie_resolution"] = cup_tie_options[selected_cup_tie]
+            settings["supercup_tie_resolution"] = cup_tie_options[selected_super_tie]
+            save_league(path, data)
+            st.success("Setările cupelor și Supercupei au fost salvate.")
+            st.rerun()
 
     if page == "Echipe și jucători":
         st.subheader("Echipe și loturi")
@@ -2345,6 +2842,7 @@ def main():
             ordered_matches = ordered_by_stage(data["istoric_meciuri"])
             render_cards([{"Etapa": m.get("etapa") or "–", "Gazdă": m["e1"],
                            "Scor": f"{m['goluri_e1']} – {m['goluri_e2']}", "Oaspeți": m["e2"],
+                           "Schimbări": match_substitution_summary(m),
                            "Masa verde": "Da" if m.get("masa_verde") else ""}
                           for m in ordered_matches])
             for match in ordered_matches:
@@ -2379,6 +2877,14 @@ def main():
                                 continue
                             if row.get("echipa") not in (edited_home, edited_away):
                                 st.error("Evenimentul trebuie să aparțină uneia dintre echipe."); invalid = True; break
+                            if row.get("tip") == "Schimbare":
+                                incoming_player = str(row.get("intra", "")).strip()
+                                if not incoming_player or incoming_player.casefold() == player_name.casefold():
+                                    st.error("Alege doi jucători diferiți pentru schimbare."); invalid = True; break
+                                new_events.append({"echipa": row["echipa"],
+                                    "minut": int(row.get("minut", 1)), "tip": "Schimbare",
+                                    "jucator": player_name, "intra": incoming_player})
+                                continue
                             assist_name = row.get("asist") or None
                             if assist_name == player_name:
                                 st.error("Marcatorul nu poate să-și dea assist lui însuși."); invalid = True; break
@@ -2454,7 +2960,7 @@ def main():
 
     if page == "Cupa":
         st.subheader("Cupa")
-        st.caption("Alege o cupă, urmărește meciurile pe runde și înregistrează rezultatul unui singur meci odată.")
+        st.caption("Alege o cupă, urmărește rundele și înregistrează fiecare tur sau retur separat.")
         teams = list(data["echipe"])
         cups = [c for c in data.get("cupe", []) if not c.get("super")]
         with st.expander("➕ Creează o cupă nouă", expanded=not cups):
@@ -2473,7 +2979,8 @@ def main():
                              (cup_name.strip() or "Cupa").casefold() for c in cups):
                         st.error("Există deja o cupă cu acest nume. Alege-o din lista cupelor, nu o crea din nou.")
                     else:
-                        new_cup = make_cup(participants, cup_name.strip() or "Cupa")
+                        use_home_away = data.get("setari_liga", {}).get("cup_leg_format") == "home_away"
+                        new_cup = make_cup(participants, cup_name.strip() or "Cupa", use_home_away)
                         data.setdefault("cupe", []).append(new_cup)
                         st.session_state["cup_select_after_create"] = new_cup["id"]
                         save_league(path, data); st.rerun()
@@ -2495,12 +3002,20 @@ def main():
                 key=cup_picker_key)
             cup = cups_by_id[selected_cup_id]
             rounds = cup.get("runde", [])
-            pending = [(ri, mi, slot) for ri, round_data in enumerate(rounds)
-                       for mi, slot in enumerate(round_data.get("meciuri", []))
-                       if slot.get("e1") and slot.get("e2") and not slot.get("meci")]
-            played_count = sum(1 for round_data in rounds for slot in round_data.get("meciuri", [])
-                               if slot.get("meci"))
-            total_games = max(1, len(cup.get("echipe", [])) - 1)
+            home_away_cup = bool(cup.get("tur_retur", False))
+            pending = []
+            for ri, round_data in enumerate(rounds):
+                for mi, slot in enumerate(round_data.get("meciuri", [])):
+                    if not slot.get("e1") or not slot.get("e2") or slot.get("castigator"):
+                        continue
+                    if not slot.get("meci"):
+                        pending.append((ri, mi, slot, 1))
+                    elif home_away_cup and not slot.get("meci_retur"):
+                        pending.append((ri, mi, slot, 2))
+            played_count = sum((1 if slot.get("meci") else 0) +
+                               (1 if slot.get("meci_retur") else 0)
+                               for round_data in rounds for slot in round_data.get("meciuri", []))
+            total_games = max(1, (len(cup.get("echipe", [])) - 1) * (2 if home_away_cup else 1))
             info_cols = st.columns(3)
             info_cols[0].metric("Echipe", len(cup.get("echipe", [])))
             info_cols[1].metric("Meciuri jucate", f"{played_count} / {total_games}")
@@ -2510,6 +3025,21 @@ def main():
                 st.success(f"🏆 {cup['castigatoare']} a câștigat {cup['nume']}!")
 
             with st.expander("Setări cupă și ștergere"):
+                cup_has_played = any(slot.get("meci") or slot.get("meci_retur")
+                    for round_data in rounds for slot in round_data.get("meciuri", []))
+                cup_formats = {"Un singur meci": False, "Tur și retur": True}
+                current_cup_format = bool(cup.get("tur_retur", False))
+                selected_cup_format_label = st.selectbox("Formatul acestei cupe", list(cup_formats),
+                    index=1 if current_cup_format else 0, disabled=cup_has_played,
+                    key=f"cup_format_{cup['id']}")
+                if cup_has_played:
+                    st.caption("Formatul nu poate fi schimbat după înregistrarea primului rezultat.")
+                elif st.button("Salvează formatul cupei", key=f"save_cup_format_{cup['id']}"):
+                    cup["tur_retur"] = cup_formats[selected_cup_format_label]
+                    save_league(path, data)
+                    st.success("Formatul cupei a fost salvat.")
+                    st.rerun()
+                st.caption("Regula de departajare se ia din Setări ligă și se aplică după timpul regulamentar sau după scorul agregat al returului.")
                 source_supercup_exists = any(
                     item.get("super") and item.get("sursa_cupa") == cup["id"]
                     for item in data.get("cupe", []))
@@ -2524,10 +3054,10 @@ def main():
                     if confirm_col.button("Da, șterge cupa", type="primary", key=f"confirm_delete_cup_{cup['id']}"):
                         for round_data in cup.get("runde", []):
                             for slot in round_data.get("meciuri", []):
-                                old_match = slot.get("meci")
-                                if old_match:
-                                    apply_player_stats(data, old_match["e1"], old_match.get("mod_e1", {}), -1)
-                                    apply_player_stats(data, old_match["e2"], old_match.get("mod_e2", {}), -1)
+                                for old_match in (slot.get("meci"), slot.get("meci_retur")):
+                                    if old_match:
+                                        apply_player_stats(data, old_match["e1"], old_match.get("mod_e1", {}), -1)
+                                        apply_player_stats(data, old_match["e2"], old_match.get("mod_e2", {}), -1)
                         data["cupe"] = [item for item in data.get("cupe", []) if item.get("id") != cup["id"]]
                         data.get("premii_alese", {}).pop(f"cupa:{cup['id']}", None)
                         for state_key in list(st.session_state):
@@ -2553,9 +3083,30 @@ def main():
                             st.caption(f"Meciul {mi + 1}")
                             played = slot.get("meci")
                             if played:
-                                penalty_note = " · decis la penaltyuri" if slot.get("penalti") else ""
-                                st.markdown(f"**{played['e1']}  {played['goluri_e1']} – {played['goluri_e2']}  {played['e2']}**")
-                                st.caption(f"Se califică {slot.get('castigator')}{penalty_note}.")
+                                substitutions = match_substitution_summary(played)
+                                if substitutions != "–":
+                                    st.caption(f"Schimbări: {substitutions}")
+                                if home_away_cup:
+                                    st.markdown(f"**Tur:** {played['e1']} {played['goluri_e1']} – {played['goluri_e2']} {played['e2']}")
+                                    returned = slot.get("meci_retur")
+                                    if returned:
+                                        substitutions = match_substitution_summary(returned)
+                                        if substitutions != "–":
+                                            st.caption(f"Schimbări retur: {substitutions}")
+                                        st.markdown(f"**Retur:** {returned['e1']} {returned['goluri_e1']} – {returned['goluri_e2']} {returned['e2']}")
+                                        aggregate_home = played["goluri_e1"] + returned["goluri_e2"]
+                                        aggregate_away = played["goluri_e2"] + returned["goluri_e1"]
+                                        penalty_note = " · departajare la penaltyuri" if slot.get("penalti") else ""
+                                        st.caption(f"Scor agregat: {slot['e1']} {aggregate_home} – {aggregate_away} {slot['e2']} · se califică {slot.get('castigator')}{penalty_note}.")
+                                        render_motm_voting(data, returned, path, username, profile,
+                                            widget_key=f"cup-{cup.get('id')}-{returned.get('id')}")
+                                    else:
+                                        st.info("Returul nu a fost jucat încă.")
+                                else:
+                                    penalty_note = " · decisă la penaltyuri" if slot.get("penalti") else ""
+                                    st.markdown(f"**{played['e1']}  {played['goluri_e1']} – {played['goluri_e2']}  {played['e2']}**")
+                                    if slot.get("castigator"):
+                                        st.caption(f"Se califică {slot.get('castigator')}{penalty_note}.")
                                 render_motm_voting(data, played, path, username, profile,
                                     widget_key=f"cup-{cup.get('id')}-{played.get('id')}")
                                 if st.button("Anulează acest rezultat și rundele următoare",
@@ -2575,27 +3126,49 @@ def main():
 
             st.markdown("### Înregistrează un rezultat")
             if pending:
-                pending_ids = "_".join(slot.get("id", f"{ri}-{mi}") for ri, mi, slot in pending)
+                pending_ids = "_".join(f"{slot.get('id', f'{ri}-{mi}')}-{leg}"
+                                        for ri, mi, slot, leg in pending)
                 selected_match = st.selectbox("Alege meciul", pending,
-                    format_func=lambda item: f"{rounds[item[0]].get('nume', 'Runda')} · {item[2]['e1']} — {item[2]['e2']}",
+                    format_func=lambda item: f"{rounds[item[0]].get('nume', 'Runda')} · "
+                        f"{'Retur' if item[3] == 2 else ('Tur' if home_away_cup else 'Meci')} · "
+                        f"{item[2]['e2'] if item[3] == 2 else item[2]['e1']} — "
+                        f"{item[2]['e1'] if item[3] == 2 else item[2]['e2']}",
                     key=f"cup_pending_{cup['id']}_{pending_ids}")
-                ri, mi, slot = selected_match
-                home_cup, away_cup = slot["e1"], slot["e2"]
-                st.info("Adaugă golurile și celelalte evenimente. Dacă scorul este egal, alegi câștigătoarea la penaltyuri.")
-                penalty_winner = st.selectbox("Câștigătoare la egalitate", [home_cup, away_cup],
-                    key=f"cpw_{cup['id']}_{ri}_{mi}")
-                result_events = render_match_event_entry(data, home_cup, away_cup,
-                    f"cup_{cup['id']}_{ri}_{mi}")
-                if st.button("Salvează rezultatul și califică echipa", type="primary",
-                             key=f"save_cup_match_{cup['id']}_{ri}_{mi}"):
-                    cup_match = build_match(home_cup, away_cup, result_events)
-                    tied = cup_match["goluri_e1"] == cup_match["goluri_e2"]
-                    winner_name = penalty_winner if tied else (
-                        home_cup if cup_match["goluri_e1"] > cup_match["goluri_e2"] else away_cup)
-                    slot["meci"], slot["castigator"], slot["penalti"] = cup_match, winner_name, tied
+                ri, mi, slot, leg = selected_match
+                if leg == 2:
+                    home_cup, away_cup = slot["e2"], slot["e1"]
+                    first_leg = slot["meci"]
+                    aggregate_before = (first_leg["goluri_e2"], first_leg["goluri_e1"])
+                    leg_caption = "Returul se joacă pe terenul echipei care a fost oaspete în tur."
+                else:
+                    home_cup, away_cup = slot["e1"], slot["e2"]
+                    aggregate_before = (0, 0)
+                    leg_caption = ""
+                if leg_caption:
+                    st.info(leg_caption)
+                cup_tie_rule = data.get("setari_liga", {}).get("cup_tie_resolution", "penalties")
+                decide_tie = not (home_away_cup and leg == 1)
+                cup_match, winner_name, decided_by_penalties, saved = render_knockout_result_entry(
+                    data, home_cup, away_cup, f"cup_{cup['id']}_{ri}_{mi}_leg{leg}",
+                    cup_tie_rule, aggregate_before, decide_tie,
+                    "Salvează turul" if home_away_cup and leg == 1 else
+                    ("Salvează returul și califică echipa" if leg == 2 else "Salvează rezultatul și califică echipa"),
+                    f"save_cup_match_{cup['id']}_{ri}_{mi}_leg{leg}")
+                if saved:
+                    if leg == 1:
+                        slot["meci"] = cup_match
+                        if not home_away_cup:
+                            slot["castigator"], slot["penalti"] = winner_name, decided_by_penalties
+                            advance_cup_winner(cup, ri, mi)
+                    else:
+                        slot["meci_retur"] = cup_match
+                        slot["castigator"], slot["penalti"] = winner_name, decided_by_penalties
+                        advance_cup_winner(cup, ri, mi)
                     apply_player_stats(data, home_cup, cup_match.get("mod_e1", {}))
                     apply_player_stats(data, away_cup, cup_match.get("mod_e2", {}))
-                    advance_cup_winner(cup, ri, mi)
+                    for suffix in ("", "_extra"):
+                        st.session_state.pop(f"match_draft_cup_{cup['id']}_{ri}_{mi}_leg{leg}{suffix}", None)
+                        st.session_state.pop(f"match_draft_cup_{cup['id']}_{ri}_{mi}_leg{leg}{suffix}_next", None)
                     save_league(path, data); st.rerun()
             elif cup.get("castigatoare"):
                 st.success("Toate rundele s-au încheiat. Cupa are câștigătoare.")
@@ -2634,7 +3207,9 @@ def main():
                         super_name = "Supercupa" if not existing_supercups else f"Supercupa {len(existing_supercups) + 1}"
                         while any(c.get("nume", "").casefold() == super_name.casefold() for c in data["cupe"]):
                             super_name += " II"
-                        data["cupe"].append(make_supercup(super_name, team_a, team_b, source_cup.get("id")))
+                        super_home_away = data.get("setari_liga", {}).get("supercup_leg_format") == "home_away"
+                        data["cupe"].append(make_supercup(super_name, team_a, team_b,
+                                                          source_cup.get("id"), super_home_away))
                         save_league(path, data)
                         st.success(f"{super_name}: {team_a} — {team_b} ({reason}).")
                         st.rerun()
@@ -2654,34 +3229,92 @@ def main():
             else:
                 final_slot = rounds[0]["meciuri"][0]
                 home_super, away_super = final_slot.get("e1"), final_slot.get("e2")
+                super_home_away = bool(selected_supercup.get("tur_retur", False))
+                final_played = final_slot.get("meci") or final_slot.get("meci_retur")
+                with st.expander("Setări Supercupă"):
+                    formats = {"Un singur meci": False, "Tur și retur": True}
+                    current_format_label = "Tur și retur" if super_home_away else "Un singur meci"
+                    has_super_result = bool(final_slot.get("meci") or final_slot.get("meci_retur"))
+                    new_format = st.selectbox("Formatul finalei", list(formats),
+                        index=list(formats).index(current_format_label), disabled=has_super_result,
+                        key=f"supercup_format_{selected_supercup['id']}")
+                    if has_super_result:
+                        st.caption("Formatul nu poate fi schimbat după înregistrarea primului rezultat.")
+                    elif st.button("Salvează formatul Supercupei", key=f"save_supercup_format_{selected_supercup['id']}"):
+                        selected_supercup["tur_retur"] = formats[new_format]
+                        save_league(path, data); st.rerun()
                 with st.container(border=True):
                     st.markdown(f"#### Finala · {home_super or '—'} — {away_super or '—'}")
                     played_super = final_slot.get("meci")
                     if played_super:
-                        penalty_note = " · decisă la penaltyuri" if final_slot.get("penalti") else ""
-                        st.write(f"{played_super['goluri_e1']} – {played_super['goluri_e2']} · câștigă **{final_slot.get('castigator')}**{penalty_note}")
+                        substitutions = match_substitution_summary(played_super)
+                        if substitutions != "–":
+                            st.caption(f"Schimbări: {substitutions}")
+                        if super_home_away:
+                            st.write(f"Tur: {played_super['e1']} {played_super['goluri_e1']} – {played_super['goluri_e2']} {played_super['e2']}")
+                            returned_super = final_slot.get("meci_retur")
+                            if returned_super:
+                                substitutions = match_substitution_summary(returned_super)
+                                if substitutions != "–":
+                                    st.caption(f"Schimbări retur: {substitutions}")
+                                st.write(f"Retur: {returned_super['e1']} {returned_super['goluri_e1']} – {returned_super['goluri_e2']} {returned_super['e2']}")
+                                aggregate_home = played_super["goluri_e1"] + returned_super["goluri_e2"]
+                                aggregate_away = played_super["goluri_e2"] + returned_super["goluri_e1"]
+                                penalty_note = " · departajare la penaltyuri" if final_slot.get("penalti") else ""
+                                st.caption(f"Scor agregat: {home_super} {aggregate_home} – {aggregate_away} {away_super} · câștigă {final_slot.get('castigator')}{penalty_note}.")
+                                render_motm_voting(data, returned_super, path, username, profile,
+                                    widget_key=f"supercup-{selected_supercup.get('id')}-{returned_super.get('id')}")
+                            else:
+                                st.info("Returul finalei urmează.")
+                        else:
+                            penalty_note = " · decisă la penaltyuri" if final_slot.get("penalti") else ""
+                            if final_slot.get("castigator"):
+                                st.write(f"{played_super['goluri_e1']} – {played_super['goluri_e2']} · câștigă **{final_slot.get('castigator')}**{penalty_note}")
                         render_motm_voting(data, played_super, path, username, profile,
                             widget_key=f"supercup-{selected_supercup.get('id')}-{played_super.get('id')}")
-                        if st.button("Anulează rezultatul Supercupei", key=f"supercup_undo_{selected_supercup['id']}"):
-                            for old_match in clear_cup_result(selected_supercup, 0, 0):
-                                apply_player_stats(data, old_match["e1"], old_match.get("mod_e1", {}), -1)
-                                apply_player_stats(data, old_match["e2"], old_match.get("mod_e2", {}), -1)
-                            save_league(path, data); st.rerun()
-                    elif home_super and away_super:
-                        penalty_winner = st.selectbox("Câștigătoare la egalitate (penaltyuri)",
-                            [home_super, away_super], key=f"supercup_penalty_{selected_supercup['id']}")
-                        events = render_match_event_entry(data, home_super, away_super,
-                            f"supercup_{selected_supercup['id']}")
-                        save_final = st.button("Salvează rezultatul final", type="primary",
-                            key=f"save_supercup_{selected_supercup['id']}")
+                    if final_played and st.button("Anulează rezultatul finalei", key=f"supercup_undo_{selected_supercup['id']}"):
+                        for old_match in clear_cup_result(selected_supercup, 0, 0):
+                            apply_player_stats(data, old_match["e1"], old_match.get("mod_e1", {}), -1)
+                            apply_player_stats(data, old_match["e2"], old_match.get("mod_e2", {}), -1)
+                        save_league(path, data); st.rerun()
+                    if home_super and away_super and (
+                            not played_super or (super_home_away and not final_slot.get("meci_retur"))):
+                        leg = 2 if played_super and super_home_away else 1
+                        if leg == 2:
+                            match_home, match_away = away_super, home_super
+                            aggregate_before = (played_super["goluri_e2"], played_super["goluri_e1"])
+                            st.markdown("### Înregistrează returul")
+                        else:
+                            match_home, match_away = home_super, away_super
+                            aggregate_before = (0, 0)
+                            if super_home_away:
+                                st.markdown("### Înregistrează turul")
+                        super_tie_rule = data.get("setari_liga", {}).get("supercup_tie_resolution", "penalties")
+                        final_match, winner, decided_by_penalties, save_final = render_knockout_result_entry(
+                            data, match_home, match_away,
+                            f"supercup_{selected_supercup['id']}_leg{leg}", super_tie_rule,
+                            aggregate_before, decide=not (super_home_away and leg == 1),
+                            button_label="Salvează turul" if super_home_away and leg == 1 else
+                                ("Salvează returul și câștigătoarea" if leg == 2 else "Salvează rezultatul final"),
+                            button_key=f"save_supercup_{selected_supercup['id']}_leg{leg}")
                         if save_final:
-                            final_match = build_match(home_super, away_super, events)
-                            tied = final_match["goluri_e1"] == final_match["goluri_e2"]
-                            winner = penalty_winner if tied else (home_super if final_match["goluri_e1"] > final_match["goluri_e2"] else away_super)
-                            final_slot["meci"], final_slot["castigator"], final_slot["penalti"] = final_match, winner, tied
-                            advance_cup_winner(selected_supercup, 0, 0)
-                            apply_player_stats(data, home_super, final_match.get("mod_e1", {}))
-                            apply_player_stats(data, away_super, final_match.get("mod_e2", {}))
+                            if leg == 1:
+                                final_slot["meci"] = final_match
+                                if not super_home_away:
+                                    final_slot["castigator"] = winner
+                                    final_slot["penalti"] = decided_by_penalties
+                                    advance_cup_winner(selected_supercup, 0, 0)
+                            else:
+                                final_slot["meci_retur"] = final_match
+                                final_slot["castigator"] = winner
+                                final_slot["penalti"] = decided_by_penalties
+                                advance_cup_winner(selected_supercup, 0, 0)
+                            apply_player_stats(data, match_home, final_match.get("mod_e1", {}))
+                            apply_player_stats(data, match_away, final_match.get("mod_e2", {}))
+                            for suffix in ("", "_extra"):
+                                state_prefix = f"match_draft_supercup_{selected_supercup['id']}_leg{leg}{suffix}"
+                                st.session_state.pop(state_prefix, None)
+                                st.session_state.pop(state_prefix + "_next", None)
                             save_league(path, data); st.rerun()
 
     if page == "Transferuri":
@@ -2734,7 +3367,10 @@ def main():
 
     if page == "Premii sezon":
         st.subheader("Premii de sezon")
-        st.caption("Alegi tu câștigătorii. Clasamentul și statisticile sunt sugestii; premiile nu se acordă automat.")
+        if data.get("setari_liga", {}).get("award_voting_mode", "direct") == "vote":
+            st.caption("Premiile individuale care nu se acordă automat se stabilesc prin vot: fiecare votant ordonează cinci jucători, iar punctele 5–4–3–2–1 se calculează la închiderea votului.")
+        else:
+            st.caption("Proprietarul sau editorul alege câștigătorii direct. Clasamentul și statisticile sunt sugestii, nu acordă premii automat.")
         pending_fixture_count = len(pending_fixtures(data))
         pending_cups = sum(1 for c in data.get("cupe", []) if not c.get("castigatoare"))
         if pending_fixture_count or pending_cups:
@@ -2771,15 +3407,15 @@ def main():
             return result
 
         league_events = event_totals(data.get("istoric_meciuri", []))
-        cup_matches = [slot["meci"] for cup_data in data.get("cupe", []) if not cup_data.get("super")
+        cup_matches = [match for cup_data in data.get("cupe", []) if not cup_data.get("super")
                        for round_data in cup_data.get("runde", []) for slot in round_data.get("meciuri", [])
-                       if slot.get("meci")]
+                       for match in (slot.get("meci"), slot.get("meci_retur")) if match]
         cup_events = event_totals(cup_matches)
         combined_events = {}
         for group in (league_events, cup_events,
-                      event_totals([slot["meci"] for cup_data in data.get("cupe", []) if cup_data.get("super")
+                      event_totals([match for cup_data in data.get("cupe", []) if cup_data.get("super")
                                     for round_data in cup_data.get("runde", []) for slot in round_data.get("meciuri", [])
-                                    if slot.get("meci")])):
+                                    for match in (slot.get("meci"), slot.get("meci_retur")) if match])):
             for player_key, numbers in group.items():
                 total = combined_events.setdefault(player_key, {"goluri": 0, "asisturi": 0})
                 total["goluri"] += numbers["goluri"]
@@ -2811,8 +3447,18 @@ def main():
             with st.container(border=True):
                 st.markdown(f"#### {award['titlu']}")
                 suggestion = suggestions.get(award["cheie"])
-                if suggestion:
+                if suggestion and not award_is_automatic(award):
                     st.caption(f"Sugestie din datele actuale: {suggestion}")
+                if award_is_automatic(award):
+                    winners = award_winners(data, award)
+                    if winners:
+                        winner_text = " / ".join(
+                            team if award["tip"] == "echipa" else f"{player} · {team}"
+                            for team, player in winners)
+                        st.success(f"Câștigător automat: {winner_text}")
+                    else:
+                        st.info("Câștigătorul va apărea automat după ce există rezultate.")
+                    continue
                 if award["tip"] == "echipa":
                     candidates = ["— Neacordat —", *sorted(data["echipe"], key=str.casefold)]
                     existing = current.get("echipa", "")
@@ -2822,6 +3468,17 @@ def main():
                             key=f"award_team_{award_index}_{safe_slug(award['cheie'])}")
                         save_award = st.form_submit_button("Salvează alegerea", type="primary")
                     chosen_value = {"echipa": "" if winner == "— Neacordat —" else winner, "jucator": ""}
+                    if save_award:
+                        data.setdefault("premii_alese", {})[award["cheie"]] = {
+                            **chosen_value, "modificat": int(dt.datetime.now().timestamp() * 1000)}
+                        save_league(path, data)
+                        st.success("Premiul a fost salvat.")
+                        st.rerun()
+                elif data.get("setari_liga", {}).get("award_voting_mode", "direct") == "vote":
+                    st.caption("Premiile pentru echipe se aleg direct de proprietar/editor; acest premiu se decide prin vot.")
+                    render_award_ballot(data, award, path, username,
+                        guest_entry if guest_entry and guest_entry.get("access_method") == "legacy" else None,
+                        widget_key=f"league-{league_key(selected_entry)}-{award['cheie']}")
                 else:
                     ordered = list(award_options)
                     target_position = award.get("poz")
@@ -2837,12 +3494,12 @@ def main():
                             disabled=len(ordered) == 1)
                         save_award = st.form_submit_button("Salvează alegerea", type="primary", disabled=len(ordered) == 1)
                     chosen_value = {"echipa": winner[0], "jucator": winner[1]}
-                if save_award:
-                    data.setdefault("premii_alese", {})[award["cheie"]] = {
-                        **chosen_value, "modificat": int(dt.datetime.now().timestamp() * 1000)}
-                    save_league(path, data)
-                    st.success("Premiul a fost salvat.")
-                    st.rerun()
+                    if save_award:
+                        data.setdefault("premii_alese", {})[award["cheie"]] = {
+                            **chosen_value, "modificat": int(dt.datetime.now().timestamp() * 1000)}
+                        save_league(path, data)
+                        st.success("Premiul a fost salvat.")
+                        st.rerun()
 
     if page == "Membri":
         st.subheader("Membri și acces la ligă")
