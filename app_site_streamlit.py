@@ -1161,6 +1161,29 @@ def _match_records(data):
                     yield slot["meci"]
 
 
+def motm_wins_for_player(data, team, player):
+    """Count matches where this player has the sole highest number of MOTM votes."""
+    wins = 0
+    for match in _match_records(data):
+        votes = match.get("voturi_motm", {})
+        if not isinstance(votes, dict) or not votes:
+            continue
+        counts = {}
+        for vote in votes.values():
+            if isinstance(vote, dict):
+                candidate = (vote.get("echipa"), vote.get("jucator"))
+            elif isinstance(vote, str) and "|" in vote:
+                candidate = tuple(vote.split("|", 1))
+            else:
+                continue
+            counts[candidate] = counts.get(candidate, 0) + 1
+        own_votes = counts.get((team, player), 0)
+        if own_votes and own_votes == max(counts.values()) and sum(
+                1 for count in counts.values() if count == own_votes) == 1:
+            wins += 1
+    return wins
+
+
 def _motm_voter(data, match, username=None, profile=None, guest_invite=None):
     teams = {match.get("e1"), match.get("e2")}
     mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
@@ -1616,6 +1639,7 @@ def render_account_profile(username, profile, paths):
         st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
 
     totals = dict(STATS_JUCATOR)
+    totals["omul_meciului"] = 0
     league_rows = []
     trophy_rows = []
     for league_entry in paths:
@@ -1640,7 +1664,10 @@ def render_account_profile(username, profile, paths):
                  if team_name and player_name else {})
         if stats:
             for stat in totals:
-                totals[stat] += int(stats.get(stat, 0) or 0)
+                if stat != "omul_meciului":
+                    totals[stat] += int(stats.get(stat, 0) or 0)
+            motm_count = motm_wins_for_player(league_data, team_name, player_name)
+            totals["omul_meciului"] += motm_count
             player_trophies = trofee_jucator(league_data, team_name, player_name)
             team_trophies = trofee_echipa(league_data, team_name)
             for trophy in player_trophies:
@@ -1650,17 +1677,18 @@ def render_account_profile(username, profile, paths):
                 trophy_rows.append({"Trofeu": trophy, "Ligă": league_name,
                                     "Echipă": team_name, "Câștigat ca": "Membru al echipei"})
         else:
-            player_trophies, team_trophies = [], []
+            player_trophies, team_trophies, motm_count = [], [], 0
         league_rows.append({"Ligă": league_name, "Proprietar": f"@{league_entry['owner']}",
             "Rol": participation, "Echipă": team_name or "–", "Jucător": player_name or "–",
             "Goluri": stats.get("goluri", 0), "Assisturi": stats.get("asisturi", 0),
             "Galbene": stats.get("cartonase_galbene", 0), "Roșii": stats.get("cartonase_rosii", 0),
+            "Omul meciului": motm_count,
             "Trofee": " · ".join([*player_trophies, *team_trophies]) or "–"})
 
     st.subheader("Statisticile mele · toate ligile")
-    metric_cols = st.columns(4)
-    for col, label, field in zip(metric_cols, ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii"),
-                                 ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+    metric_cols = st.columns(5)
+    for col, label, field in zip(metric_cols, ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii", "Omul meciului"),
+                                 ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
         col.metric(label, totals[field])
     st.markdown("#### Participarea și statisticile pe fiecare ligă")
     if league_rows:
@@ -2976,6 +3004,7 @@ def main():
             else:
                 st.info("Adaugă echipe în ligă pentru a-ți asocia un jucător.")
         totals = dict(STATS_JUCATOR)
+        totals["omul_meciului"] = 0
         associations = []
         for league_entry in paths:
             league_data = load_league(league_entry["path"])
@@ -2988,20 +3017,24 @@ def main():
             if not stats:
                 continue
             for stat in totals:
-                totals[stat] += int(stats.get(stat, 0) or 0)
+                if stat != "omul_meciului":
+                    totals[stat] += int(stats.get(stat, 0) or 0)
+            motm_count = motm_wins_for_player(league_data, team_name, player_name)
+            totals["omul_meciului"] += motm_count
             associations.append((league_data.get("nume_liga", league_entry["path"].stem), team_name,
-                                 player_name, stats, trofee_jucator(league_data, team_name, player_name)))
+                                 player_name, stats, trofee_jucator(league_data, team_name, player_name), motm_count))
         st.markdown("#### Statisticile mele")
-        mcols = st.columns(4)
-        for col, title, field in zip(mcols, ("Goluri", "Assisturi", "Galbene", "Roșii"),
-                                     ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+        mcols = st.columns(5)
+        for col, title, field in zip(mcols, ("Goluri", "Assisturi", "Galbene", "Roșii", "Omul meciului"),
+                                     ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
             col.metric(title, totals[field])
         if associations:
             render_cards([{"Ligă": league, "Echipă": team, "Jucător": player,
                 "Goluri": stats.get("goluri", 0), "Assisturi": stats.get("asisturi", 0),
                 "Galbene": stats.get("cartonase_galbene", 0), "Roșii": stats.get("cartonase_rosii", 0),
+                "Omul meciului": motm_count,
                 "Trofee": " · ".join(trophies) if trophies else "–"}
-                for league, team, player, stats, trophies in associations])
+                for league, team, player, stats, trophies, motm_count in associations])
         else:
             st.caption("Asociază un jucător cu profilul tău pentru a vedea statisticile personale.")
 
