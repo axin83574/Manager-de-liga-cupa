@@ -1985,7 +1985,9 @@ def render_account_profile(username, profile, paths):
     st.title("Profilul meu")
     st.caption("Profilul rămâne disponibil indiferent de liga deschisă.")
 
-    birthday_value = dt.date(2000, 1, 1)
+    today = dt.date.today()
+    default_birthday = today.replace(year=today.year - 12)
+    birthday_value = default_birthday
     try:
         birthday_value = dt.datetime.strptime(profile.get("data_nasterii", ""), "%d.%m.%Y").date()
     except (ValueError, TypeError):
@@ -1995,8 +1997,8 @@ def render_account_profile(username, profile, paths):
             display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
             account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
                                           help="Te poți conecta și cu această adresă după salvare.")
-            birthday = st.date_input("Data nașterii", value=min(birthday_value, dt.date.today()),
-                                     max_value=dt.date.today())
+            birthday = st.date_input("Data nașterii", value=min(birthday_value, today),
+                                     min_value=dt.date(1900, 1, 1), max_value=today)
             professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
                 index=0 if profile.get("joaca_fotbal") == "Da" else 1)
             positions = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
@@ -2210,7 +2212,9 @@ def auth_view(cookie_manager):
             username = st.text_input("Nume de utilizator", key="new_username")
             email = st.text_input("Adresă de e-mail", key="new_email")
             name = st.text_input("Nume și prenume")
-            birthday = st.date_input("Data nașterii", value=dt.date(2000, 1, 1), max_value=dt.date.today())
+            today = dt.date.today()
+            birthday = st.date_input("Data nașterii", value=today.replace(year=today.year - 12),
+                                     min_value=dt.date(1900, 1, 1), max_value=today)
             plays = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"])
             position = st.selectbox("Poziția ta", ["Portar", "Fundaș", "Mijlocaș", "Atacant"])
             password = st.text_input("Parolă (minimum 6 caractere)", type="password", key="new_password")
@@ -3642,7 +3646,8 @@ def main():
 
     if page == "Profil":
         st.subheader("Profil personal")
-        birthday_value = dt.date(2000, 1, 1)
+        today = dt.date.today()
+        birthday_value = today.replace(year=today.year - 12)
         try:
             birthday_value = dt.datetime.strptime(profile.get("data_nasterii", ""), "%d.%m.%Y").date()
         except (ValueError, TypeError):
@@ -3651,7 +3656,8 @@ def main():
             display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
             account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
                                           help="După salvare, te vei putea conecta și cu această adresă.")
-            birthday = st.date_input("Data nașterii", value=min(birthday_value, dt.date.today()), max_value=dt.date.today())
+            birthday = st.date_input("Data nașterii", value=min(birthday_value, today),
+                                     min_value=dt.date(1900, 1, 1), max_value=today)
             professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
                 index=0 if profile.get("joaca_fotbal") == "Da" else 1)
             positions = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
