@@ -1760,9 +1760,9 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     can_choose_player = username or (guest_profile and guest_profile.get("kind") == "jucator") or (
         guest_invite and guest_invite.get("access_method") == "legacy"
         and guest_invite["invitation"].get("tip") == "jucator")
-    tabs = st.tabs(["Clasament", "Loturi", "Istoric meciuri", "Program", "Cupe", "Statistici", "Premii"] +
+    tabs = st.tabs(["Clasament", "Statistici", "Loturi", "Istoric meciuri", "Program", "Cupe", "Premii"] +
                    (["Alegerea mea"] if can_choose_player else []))
-    t1, t2, t3, t4, t5 = tabs[:5]
+    t1, t2, t3, t4, t5 = tabs[0], tabs[2], tabs[3], tabs[4], tabs[5]
     with t1:
         st.subheader(data.get("nume_liga", "Liga"))
         render_cards(ranking(data))
@@ -1824,7 +1824,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                             widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
                     else:
                         st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
-    with tabs[5]:
+    with tabs[1]:
         st.subheader("Statistici jucători")
         stat_sections = (
             ("⚽ Marcatori", "goluri", "Goluri"),
