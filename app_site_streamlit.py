@@ -477,6 +477,7 @@ def join_league_with_code(entry, username, access_code, member_choice=None):
     role = "editor" if code_type == "editor" else "vizitator"
     choice = member_choice if code_type == "spectator" else None
     member_type = "jucator" if choice and choice.get("kind") == "jucator" else "spectator"
+    users_to_save = None
     if entry["owner"].casefold() != username.casefold():
         fresh.setdefault("membri", [])
         membership = next((item for item in fresh["membri"]
@@ -498,8 +499,17 @@ def join_league_with_code(entry, username, access_code, member_choice=None):
             if username in users:
                 users[username].setdefault("selectii_ligi", {})[league_key(entry)] = {
                     **selection, "pozitie": users[username].get("pozitie", "")}
-                save_users(users)
+                users_to_save = users
         _store_league(entry["path"], fresh)
+        # Save the league membership/selection first. If account-profile
+        # synchronization fails, the player can still enter and the choice
+        # remains available from the league data.
+        if users_to_save is not None:
+            try:
+                save_users(users_to_save)
+                st.session_state.pop("player_profile_sync_error", None)
+            except Exception as exc:
+                st.session_state["player_profile_sync_error"] = str(exc)
     return role if entry["owner"].casefold() != username.casefold() else "owner"
 
 
@@ -1133,6 +1143,21 @@ def render_cards(rows):
 
 def render_view_only(data, username, profile, entry, guest_invite=None, guest_profile=None):
     st.info("Acces de vizualizare · nu poți modifica această ligă.")
+    if username:
+        selection_key = league_key(entry)
+        saved_selection = (profile.get("selectii_ligi", {}).get(selection_key) or
+                           data.get("selectii_membri", {}).get(username, {}))
+        if saved_selection.get("tip") == "jucator" or saved_selection.get("jucator"):
+            st.success(f"Ai intrat ca jucător: {saved_selection.get('jucator')} · {saved_selection.get('echipa')}.")
+            if st.session_state.get("player_profile_sync_error"):
+                st.warning("Alegerea a fost salvată în ligă, dar nu s-a putut sincroniza cu profilul contului. Statisticile din ligă rămân disponibile.")
+            player_stats = (data.get("echipe", {}).get(saved_selection.get("echipa"), {})
+                            .get("jucatori", {}).get(saved_selection.get("jucator"), {}))
+            if player_stats:
+                stat_cols = st.columns(4)
+                for col, label, key in zip(stat_cols, ("Goluri", "Assisturi", "Galbene", "Roșii"),
+                        ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+                    col.metric(label, player_stats.get(key, 0))
     can_choose_player = username or (guest_profile and guest_profile.get("kind") == "jucator") or (
         guest_invite and guest_invite.get("access_method") == "legacy"
         and guest_invite["invitation"].get("tip") == "jucator")
@@ -1186,7 +1211,8 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             if username:
                 st.write(f"{profile.get('nume', username)} · @{username} · {profile.get('pozitie', 'Poziție nespecificată')}")
                 selection_key = league_key(entry)
-                prior = profile.get("selectii_ligi", {}).get(selection_key, {})
+                prior = (profile.get("selectii_ligi", {}).get(selection_key) or
+                         data.get("selectii_membri", {}).get(username, {}))
             elif guest_profile:
                 st.write(f"Profilul meu · **{guest_profile.get('player')}** · {guest_profile.get('team')}")
                 prior = data.get("selectii_membri", {}).get(guest_profile.get("profile_id"), {})
@@ -1555,6 +1581,12 @@ def main():
                 st.query_params.clear()
                 st.session_state.pop("spectator_profile", None)
                 st.session_state.pop("spectator_choice_stage", None)
+                st.rerun()
+            return
+        except Exception as exc:
+            st.error("Nu am putut salva intrarea ca jucător. Verifică dacă aplicația Streamlit Cloud este actualizată și încearcă din nou.")
+            st.caption(f"Detaliu: {exc}")
+            if st.button("Reîncearcă intrarea"):
                 st.rerun()
             return
         if access_role != "owner":
@@ -2530,10 +2562,11 @@ def main():
         totals = dict(STATS_JUCATOR)
         associations = []
         for league_entry in paths:
-            selection = profile.get("selectii_ligi", {}).get(league_key(league_entry))
+            league_data = load_league(league_entry["path"])
+            selection = (profile.get("selectii_ligi", {}).get(league_key(league_entry)) or
+                         league_data.get("selectii_membri", {}).get(username))
             if not selection:
                 continue
-            league_data = load_league(league_entry["path"])
             team_name, player_name = selection.get("echipa"), selection.get("jucator")
             stats = league_data.get("echipe", {}).get(team_name, {}).get("jucatori", {}).get(player_name)
             if not stats:
