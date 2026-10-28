@@ -1713,7 +1713,7 @@ def main():
         st.title(data.get("nume_liga", "Liga"))
         st.caption(f"Partajată de @{owner}")
         render_view_only(data, username, profile, selected_entry,
-                         guest_entry if guest_entry.get("access_method") == "legacy" else None,
+                         guest_entry if guest_entry and guest_entry.get("access_method") == "legacy" else None,
                          guest_profile)
         return
     pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
