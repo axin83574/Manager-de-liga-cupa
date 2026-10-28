@@ -295,13 +295,16 @@ def verify_password(record, password):
         return False
 
 
-def create_account(username, password, name, birthday, plays_professional, position):
+def create_account(username, email, password, name, birthday, plays_professional, position):
     username = username.strip()
     normalized_username = username.lower()
+    normalized_email = email.strip().casefold()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,23}", username):
         raise ValueError("Utilizatorul trebuie să aibă 3–24 caractere și să conțină litere, cifre, _ sau -.")
     if normalized_username in RESERVED_USERNAMES:
         raise ValueError("Acest nume de utilizator este rezervat.")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+        raise ValueError("Introdu o adresă de e-mail validă.")
     if len(password) < 6:
         raise ValueError("Parola trebuie să aibă cel puțin 6 caractere.")
     if not name.strip():
@@ -315,8 +318,12 @@ def create_account(username, password, name, birthday, plays_professional, posit
     users = load_users()
     if normalized_username in users:
         raise ValueError("Există deja un cont cu acest nume de utilizator.")
+    if any(str(record.get("email", "")).strip().casefold() == normalized_email
+           for record in users.values()):
+        raise ValueError("Există deja un cont cu această adresă de e-mail.")
     salt, digest = password_hash(password)
-    users[normalized_username] = {"nume": name.strip(), "data_nasterii": birthday.strftime("%d.%m.%Y"),
+    users[normalized_username] = {"nume": name.strip(), "email": normalized_email,
+        "data_nasterii": birthday.strftime("%d.%m.%Y"),
         "joaca_fotbal": plays_professional, "pozitie": position, "sare": salt, "hash": digest,
         "iteratii": PASSWORD_ITERATIONS, "dispozitive": [], "selectii_ligi": {},
         "creat": dt.date.today().strftime("%d.%m.%Y")}
@@ -1267,7 +1274,7 @@ def render_guest_player_choice(data, path, invitation):
 
 def auth_view(cookie_manager):
     st.markdown("## Intră în cont sau creează un profil")
-    st.caption("Conectează-te cu numele de utilizator ales la înregistrare și parola contului.")
+    st.caption("Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului.")
     if not SUPABASE_ENABLED:
         st.warning("Baza de date online nu este conectată. Conturile create aici se pot pierde când aplicația repornește. Verifică Secrets în setările Streamlit Cloud.")
     pending = st.session_state.get("pending_remember_login")
@@ -1279,7 +1286,7 @@ def auth_view(cookie_manager):
     login_tab, signup_tab = st.tabs(["Autentificare", "Cont nou"])
     with login_tab:
         with st.form("login_account"):
-            username = st.text_input("Nume de utilizator (nu adresa de e-mail)")
+            username = st.text_input("Nume de utilizator sau e-mail")
             password = st.text_input("Parolă", type="password")
             remember = st.checkbox("Rămâi conectat pe acest dispozitiv (30 de zile)", value=True)
             login = st.form_submit_button("Intră în cont", type="primary")
@@ -1290,9 +1297,15 @@ def auth_view(cookie_manager):
             if len(attempts) >= 5:
                 st.error("Prea multe încercări. Așteaptă un minut și încearcă din nou.")
             else:
-                key = username.strip().lower()
+                identifier = username.strip().casefold()
                 try:
-                    record = load_users().get(key)
+                    users = load_users()
+                    if "@" in identifier:
+                        key = next((user_key for user_key, user_record in users.items()
+                                    if str(user_record.get("email", "")).strip().casefold() == identifier), "")
+                    else:
+                        key = identifier
+                    record = users.get(key)
                 except Exception as exc:
                     st.error("Nu pot accesa baza de date a conturilor. Verifică setările Supabase din Streamlit Cloud și încearcă din nou.")
                     st.caption(f"Detaliu: {exc}")
@@ -1312,10 +1325,11 @@ def auth_view(cookie_manager):
                     st.session_state.pop("active_league_picker", None)
                     st.rerun()
                 attempts.append(now)
-                st.error("Nu am putut autentifica acest cont. Verifică numele de utilizator folosit la înregistrare (nu e-mailul) și parola. Dacă ai creat contul înainte de conectarea Supabase, este posibil să nu existe în baza de date online.")
+                st.error("E-mailul/numele de utilizator sau parola nu corespund. Dacă acest cont a fost creat înainte să adaugi e-mailul, conectează-te cu numele de utilizator.")
     with signup_tab:
         with st.form("signup_account"):
             username = st.text_input("Nume de utilizator", key="new_username")
+            email = st.text_input("Adresă de e-mail", key="new_email")
             name = st.text_input("Nume și prenume")
             birthday = st.date_input("Data nașterii", value=dt.date(2000, 1, 1), max_value=dt.date.today())
             plays = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"])
@@ -1331,7 +1345,7 @@ def auth_view(cookie_manager):
             else:
                 try:
                     account_key = create_account(
-                        username, password, name, birthday, plays, position)
+                        username, email, password, name, birthday, plays, position)
                     if remember_new:
                         remember_account(cookie_manager, account_key)
                         st.success("Contul a fost creat. Se salvează conectarea pe acest dispozitiv…")
@@ -2458,6 +2472,8 @@ def main():
             pass
         with st.form("profile_details"):
             display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
+            account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
+                                          help="După salvare, te vei putea conecta și cu această adresă.")
             birthday = st.date_input("Data nașterii", value=min(birthday_value, dt.date.today()), max_value=dt.date.today())
             professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
                 index=0 if profile.get("joaca_fotbal") == "Da" else 1)
@@ -2467,10 +2483,20 @@ def main():
             save_profile = st.form_submit_button("Salvează profilul")
         if save_profile:
             users = load_users()
-            users[username].update({"nume": display_name.strip() or username,
-                "data_nasterii": birthday.strftime("%d.%m.%Y"),
-                "joaca_fotbal": professional, "pozitie": position})
-            save_users(users); st.success("Profilul a fost salvat."); st.rerun()
+            normalized_email = account_email.strip().casefold()
+            email_in_use = any(user_key != username and
+                str(user_record.get("email", "")).strip().casefold() == normalized_email
+                for user_key, user_record in users.items()) if normalized_email else False
+            if normalized_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+                st.error("Introdu o adresă de e-mail validă.")
+            elif email_in_use:
+                st.error("Adresa aceasta este deja folosită de alt cont.")
+            else:
+                users[username].update({"nume": display_name.strip() or username,
+                    "email": normalized_email,
+                    "data_nasterii": birthday.strftime("%d.%m.%Y"),
+                    "joaca_fotbal": professional, "pozitie": position})
+                save_users(users); st.success("Profilul a fost salvat. Te poți conecta și cu e-mailul."); st.rerun()
 
         st.markdown("#### Parolă")
         with st.form("change_account_password"):
