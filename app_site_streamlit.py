@@ -1305,6 +1305,171 @@ def render_guest_player_choice(data, path, invitation):
             st.metric("Goluri în această ligă", stats.get("goluri", 0))
 
 
+def render_account_profile(username, profile, paths):
+    st.title("Profilul meu")
+    st.caption("Profilul rămâne disponibil indiferent de liga deschisă.")
+
+    birthday_value = dt.date(2000, 1, 1)
+    try:
+        birthday_value = dt.datetime.strptime(profile.get("data_nasterii", ""), "%d.%m.%Y").date()
+    except (ValueError, TypeError):
+        pass
+    with st.expander("Datele contului", expanded=False):
+        with st.form("global_profile_details"):
+            display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
+            account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
+                                          help="Te poți conecta și cu această adresă după salvare.")
+            birthday = st.date_input("Data nașterii", value=min(birthday_value, dt.date.today()),
+                                     max_value=dt.date.today())
+            professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
+                index=0 if profile.get("joaca_fotbal") == "Da" else 1)
+            positions = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
+            position = st.selectbox("Poziția ta", positions,
+                index=positions.index(profile["pozitie"]) if profile.get("pozitie") in positions else 0)
+            save_profile = st.form_submit_button("Salvează profilul")
+        if save_profile:
+            users = load_users()
+            normalized_email = account_email.strip().casefold()
+            email_in_use = any(user_key != username and
+                str(user_record.get("email", "")).strip().casefold() == normalized_email
+                for user_key, user_record in users.items()) if normalized_email else False
+            if normalized_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+                st.error("Introdu o adresă de e-mail validă.")
+            elif email_in_use:
+                st.error("Adresa aceasta este deja folosită de alt cont.")
+            else:
+                users[username].update({"nume": display_name.strip() or username,
+                    "email": normalized_email, "data_nasterii": birthday.strftime("%d.%m.%Y"),
+                    "joaca_fotbal": professional, "pozitie": position})
+                save_users(users)
+                st.success("Profilul a fost salvat.")
+                st.rerun()
+
+    with st.expander("Schimbă parola", expanded=False):
+        with st.form("global_change_account_password"):
+            old_password = st.text_input("Parola curentă", type="password")
+            new_password = st.text_input("Parola nouă", type="password")
+            new_password_confirm = st.text_input("Confirmă parola nouă", type="password")
+            change_password = st.form_submit_button("Schimbă parola")
+        if change_password:
+            if not verify_password(profile, old_password):
+                st.error("Parola curentă este greșită.")
+            elif len(new_password) < 6:
+                st.error("Parola nouă trebuie să aibă cel puțin 6 caractere.")
+            elif new_password != new_password_confirm:
+                st.error("Parolele noi nu coincid.")
+            else:
+                users = load_users()
+                salt, digest = password_hash(new_password)
+                users[username].update({"sare": salt, "hash": digest,
+                    "iteratii": PASSWORD_ITERATIONS, "dispozitive": []})
+                save_users(users)
+                st.success("Parola a fost schimbată.")
+                st.rerun()
+
+    st.subheader("Asocierea cu jucătorii din ligile tale")
+    if paths:
+        league_labels = [f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · @{item['owner']}"
+                         for item in paths]
+        selected_index = st.selectbox("Liga", range(len(paths)),
+            format_func=lambda index: league_labels[index], key="global_profile_league_index")
+        selected_entry = paths[selected_index]
+        selected_data = load_league(selected_entry["path"])
+        teams = list(selected_data.get("echipe", {}))
+        if teams:
+            selected_key = league_key(selected_entry)
+            previous = (profile.get("selectii_ligi", {}).get(selected_key) or
+                        selected_data.get("selectii_membri", {}).get(username, {}))
+            widget_id = f"{safe_slug(selected_entry['owner'])}_{safe_slug(selected_entry['path'].stem)}"
+            team = st.selectbox("Echipa", teams,
+                index=teams.index(previous["echipa"]) if previous.get("echipa") in teams else 0,
+                key=f"global_profile_team_{widget_id}")
+            players = list(selected_data["echipe"][team].get("jucatori", {}))
+            player = st.selectbox("Jucător", players,
+                index=players.index(previous["jucator"]) if previous.get("jucator") in players else 0,
+                key=f"global_profile_player_{widget_id}_{safe_slug(team)}") if players else None
+            if not players:
+                st.info("Echipa aleasă nu are încă jucători în lot.")
+            if st.button("Salvează asocierea", type="primary", disabled=not bool(players),
+                         key=f"global_profile_save_{widget_id}") and player:
+                try:
+                    if selected_entry["role"] == "owner":
+                        users = load_users()
+                        users[username].setdefault("selectii_ligi", {})[selected_key] = {
+                            "echipa": team, "jucator": player, "pozitie": profile.get("pozitie", ""),
+                            "actualizat": dt.datetime.now().timestamp()}
+                        save_users(users)
+                    else:
+                        save_code_member_choice(selected_entry, username, team, player)
+                    st.success("Asocierea a fost salvată.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Nu am putut salva asocierea: {exc}")
+        else:
+            st.info("Liga selectată nu are echipe încă.")
+    else:
+        st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
+
+    totals = dict(STATS_JUCATOR)
+    league_rows = []
+    trophy_rows = []
+    for league_entry in paths:
+        league_data = load_league(league_entry["path"])
+        league_name = league_data.get("nume_liga", league_entry["path"].stem)
+        selection = (profile.get("selectii_ligi", {}).get(league_key(league_entry)) or
+                     league_data.get("selectii_membri", {}).get(username))
+        member = next((item for item in league_data.get("membri", [])
+                       if str(item.get("username", "")).casefold() == username.casefold()
+                       and item.get("activ", True)), None)
+        if league_entry["role"] == "owner":
+            participation = "Proprietar"
+        elif selection and selection.get("jucator"):
+            participation = "Jucător"
+        elif member and member.get("tip") == "jucator":
+            participation = "Jucător"
+        else:
+            participation = "Spectator"
+        team_name = selection.get("echipa") if selection else None
+        player_name = selection.get("jucator") if selection else None
+        stats = (league_data.get("echipe", {}).get(team_name, {}).get("jucatori", {}).get(player_name, {})
+                 if team_name and player_name else {})
+        if stats:
+            for stat in totals:
+                totals[stat] += int(stats.get(stat, 0) or 0)
+            player_trophies = trofee_jucator(league_data, team_name, player_name)
+            team_trophies = trofee_echipa(league_data, team_name)
+            for trophy in player_trophies:
+                trophy_rows.append({"Trofeu": trophy, "Ligă": league_name,
+                                    "Echipă": team_name, "Câștigat ca": player_name})
+            for trophy in team_trophies:
+                trophy_rows.append({"Trofeu": trophy, "Ligă": league_name,
+                                    "Echipă": team_name, "Câștigat ca": "Membru al echipei"})
+        else:
+            player_trophies, team_trophies = [], []
+        league_rows.append({"Ligă": league_name, "Proprietar": f"@{league_entry['owner']}",
+            "Rol": participation, "Echipă": team_name or "–", "Jucător": player_name or "–",
+            "Goluri": stats.get("goluri", 0), "Assisturi": stats.get("asisturi", 0),
+            "Galbene": stats.get("cartonase_galbene", 0), "Roșii": stats.get("cartonase_rosii", 0),
+            "Trofee": " · ".join([*player_trophies, *team_trophies]) or "–"})
+
+    st.subheader("Statisticile mele · toate ligile")
+    metric_cols = st.columns(4)
+    for col, label, field in zip(metric_cols, ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii"),
+                                 ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+        col.metric(label, totals[field])
+    st.markdown("#### Participarea și statisticile pe fiecare ligă")
+    if league_rows:
+        render_cards(league_rows)
+    else:
+        st.info("Nu ai fost încă în nicio ligă.")
+    st.markdown("#### Trofeele mele")
+    if trophy_rows:
+        render_cards(trophy_rows)
+        st.metric("Trofee câștigate", len(trophy_rows))
+    else:
+        st.caption("Trofeele câștigate în ligile asociate profilului vor apărea aici.")
+
+
 def auth_view(cookie_manager):
     st.markdown("## Intră în cont sau creează un profil")
     st.caption("Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului.")
@@ -1644,14 +1809,24 @@ def main():
         else:
             st.markdown(f"### 👤 {profile.get('nume') or username}")
             st.caption(f"@{username}")
+            if st.button("👤 Profilul meu", width="stretch", key="open_global_profile"):
+                st.session_state["show_account_profile"] = True
+                st.rerun()
             if st.button("Deconectare", width="stretch"):
                 revoke_remembered_account(cookie_manager)
                 st.session_state.pop("user_key", None)
                 st.session_state.pop("active_league_role", None)
                 st.session_state.pop("entered_league", None)
                 st.session_state.pop("active_league_picker", None)
+                st.session_state.pop("show_account_profile", None)
                 st.rerun()
         st.divider()
+    if st.session_state.get("show_account_profile") and not is_guest:
+        if st.button("↩ Înapoi la aplicație"):
+            st.session_state.pop("show_account_profile", None)
+            st.rerun()
+        render_account_profile(username, profile, paths)
+        return
     by_label = {f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · "
                 f"{item['owner']} · {'proprie' if item['role'] == 'owner' else item['role']}": item
                 for item in paths}
@@ -1762,9 +1937,7 @@ def main():
         return
     pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupa",
             "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export"]
-    if not is_guest:
-        pages.insert(-1, "Profil")
-    elif guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
+    if is_guest and guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
         pages.insert(-1, "Alegerea mea")
     if st.session_state.get("main_navigation") not in pages:
         st.session_state["main_navigation"] = pages[0]
