@@ -653,7 +653,7 @@ def _store_league(path, data):
 
 def save_league(path, data):
     role = st.session_state.get("active_league_role")
-    if role == "vizitator":
+    if role not in {"owner", "editor"}:
         st.error("Ai acces doar pentru vizualizare în această ligă.")
         st.stop()
     exists = path.exists()
@@ -1425,6 +1425,13 @@ def rebuild_stats(data):
                     if match:
                         apply_player_stats(data, match["e1"], match.get("mod_e1", {}))
                         apply_player_stats(data, match["e2"], match.get("mod_e2", {}))
+    for team in data["echipe"].values():
+        for stats in team.get("jucatori", {}).values():
+            adjustments = stats.get("_ajustari_statistici", {})
+            if isinstance(adjustments, dict):
+                for key in STATS_JUCATOR:
+                    stats[key] = max(0, int(stats.get(key, 0) or 0) +
+                                     int(adjustments.get(key, 0) or 0))
 
 
 def generate_rounds(teams, home_away=False):
@@ -1771,7 +1778,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             with st.expander(f"{team} · {len(info.get('jucatori', {}))} jucători"):
                 render_cards([{"Jucător": p, "Poziție": s.get("pozitie") or "–",
                                "Trofee": " · ".join(trofee_jucator(data, team, p)) or "–",
-                               **{k: v for k, v in s.items() if k != "pozitie"}}
+                               **{k: v for k, v in s.items() if k not in {"pozitie", "_ajustari_statistici"}}}
                               for p, s in info.get("jucatori", {}).items()])
     with t3:
         ordered_matches = ordered_by_stage(data.get("istoric_meciuri", []))
@@ -2613,7 +2620,7 @@ def main():
     owner = selected_entry["owner"]
     st.session_state["active_league_role"] = role
     data = load_league(path)
-    if role == "vizitator":
+    if role not in {"owner", "editor"}:
         st.title(data.get("nume_liga", "Liga"))
         st.caption(f"Partajată de @{owner}")
         render_view_only(data, username, profile, selected_entry,
@@ -2815,8 +2822,35 @@ def main():
                         save_league(path, data); st.rerun()
                 if team["jucatori"]:
                     render_cards([{"Jucător": p, "Poziție": s.get("pozitie") or "–",
-                                   **{k: v for k, v in s.items() if k != "pozitie"}}
+                                   **{k: v for k, v in s.items() if k not in {"pozitie", "_ajustari_statistici"}}}
                                   for p, s in team["jucatori"].items()])
+                    with st.expander("Corectează statisticile unui jucător"):
+                        st.caption("Corecțiile rămân salvate și după recalcularea statisticilor din istoricul meciurilor.")
+                        edited_player = st.selectbox("Jucător", list(team["jucatori"]),
+                            key=f"manual_stats_player_{safe_slug(name)}")
+                        edited_stats = team["jucatori"][edited_player]
+                        stat_fields = (("goluri", "Goluri"), ("asisturi", "Assisturi"),
+                                       ("cartonase_galbene", "Cartonașe galbene"),
+                                       ("cartonase_rosii", "Cartonașe roșii"))
+                        stat_form_key = f"manual_stats_form_{safe_slug(name)}_{safe_slug(edited_player)}"
+                        with st.form(stat_form_key):
+                            corrected_values = {}
+                            stat_columns = st.columns(2)
+                            for index, (field, label) in enumerate(stat_fields):
+                                corrected_values[field] = stat_columns[index % 2].number_input(
+                                    label, min_value=0, value=int(edited_stats.get(field, 0) or 0),
+                                    step=1, key=f"{stat_form_key}_{field}")
+                            save_player_stats = st.form_submit_button("Salvează statisticile", type="primary")
+                        if save_player_stats:
+                            adjustments = edited_stats.setdefault("_ajustari_statistici", {})
+                            for field, _ in stat_fields:
+                                current_adjustment = int(adjustments.get(field, 0) or 0)
+                                derived_value = int(edited_stats.get(field, 0) or 0) - current_adjustment
+                                edited_stats[field] = int(corrected_values[field])
+                                adjustments[field] = int(corrected_values[field]) - derived_value
+                            save_league(path, data)
+                            st.success(f"Statisticile lui {edited_player} au fost actualizate.")
+                            st.rerun()
                     with st.form(f"player_position_form_{safe_slug(name)}"):
                         position_player = st.selectbox("Actualizează poziția", list(team["jucatori"]),
                             key=f"position_player_{safe_slug(name)}")
