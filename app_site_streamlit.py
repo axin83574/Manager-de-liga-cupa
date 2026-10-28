@@ -33,7 +33,6 @@ PASSWORD_ITERATIONS = 200_000
 RESERVED_USERNAMES = {"con", "prn", "aux", "nul", "admin"} | \
     {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 REMEMBER_COOKIE = "liga_remember_me"
-THEME_COOKIE = "liga_dark_mode"
 REMEMBER_DAYS = 30
 
 
@@ -270,14 +269,6 @@ def finish_pending_remember_login(cookie_manager):
     st.session_state["remembered_token_hash"] = token_hash
     st.session_state.pop("pending_remember_login", None)
     return True
-
-
-def persist_theme_cookie(cookie_manager):
-    value = "dark" if st.session_state.get("dark_mode", False) else "light"
-    cookie_manager.set(THEME_COOKIE, value, key=f"save_theme_{uuid.uuid4().hex}",
-        path="/", expires_at=dt.datetime.now() + dt.timedelta(days=365),
-        max_age=365 * 24 * 60 * 60, secure=cookie_is_secure(), same_site="strict")
-    st.session_state["theme_preference_changed"] = True
 
 
 def password_hash(password, salt=None, iterations=PASSWORD_ITERATIONS):
@@ -1365,12 +1356,9 @@ def auth_view(cookie_manager):
 def main():
     st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide")
     cookie_manager = stx.CookieManager(key="persistent_cookie_manager")
-    if not st.session_state.get("theme_preference_changed"):
-        saved_theme = browser_cookie(cookie_manager, THEME_COOKIE)
-        if saved_theme in ("dark", "light"):
-            st.session_state["dark_mode"] = saved_theme == "dark"
-        else:
-            st.session_state.setdefault("dark_mode", False)
+    # Tema este fixată pe întunecat pentru a evita diferențele de contrast
+    # dintre componentele Streamlit și stilurile personalizate.
+    st.session_state["dark_mode"] = True
     if not st.session_state.get("user_key"):
         if not finish_pending_remember_login(cookie_manager):
             restore_remembered_account(cookie_manager)
@@ -1514,12 +1502,7 @@ def main():
         button[data-testid="stBaseButton-primary"]:disabled *,button[data-testid="stBaseButton-primaryFormSubmit"]:disabled * { color:#9eaaa1 !important; }
         </style>
         """, unsafe_allow_html=True)
-    title_col, theme_col = st.columns([5, 1.5], vertical_alignment="center")
-    with title_col:
-        st.title("⚽ Managerul ligii de fotbal")
-    with theme_col:
-        st.toggle("🌙 Întunecat", key="dark_mode", on_change=persist_theme_cookie,
-                  args=(cookie_manager,), help="Tema se păstrează pe acest dispozitiv.")
+    st.title("⚽ Managerul ligii de fotbal")
     st.markdown('<div class="league-subtitle">Clasamente, meciuri și cupe într-un singur loc</div>', unsafe_allow_html=True)
     access_code = str(st.query_params.get("cod", "")).strip()
     invite_token = str(st.query_params.get("invitat", "")).strip()
