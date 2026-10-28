@@ -2659,50 +2659,28 @@ def main():
         "Alegerea mea": "🪪  Alegerea mea",
         "Import / export": "⚙  Import / export",
     }
-    previous_navigation = st.session_state.get("main_navigation", pages[0])
-    if previous_navigation not in pages:
-        previous_navigation = pages[0]
-    desktop_navigation = st.session_state.get("main_navigation_desktop", previous_navigation)
-    mobile_navigation = st.session_state.get("main_navigation_mobile", previous_navigation)
-    if desktop_navigation in pages and desktop_navigation != previous_navigation:
-        current_navigation = desktop_navigation
-    elif mobile_navigation in pages and mobile_navigation != previous_navigation:
-        current_navigation = mobile_navigation
-    else:
-        current_navigation = previous_navigation
-    st.session_state["main_navigation"] = current_navigation
-    st.session_state["main_navigation_desktop"] = current_navigation
-    st.session_state["main_navigation_mobile"] = current_navigation
+    if st.session_state.get("main_navigation") not in pages:
+        st.session_state["main_navigation"] = pages[0]
     st.markdown("""
     <style>
     [data-testid="stSidebar"] [role="radiogroup"] > label {
       box-sizing: border-box; width: 100%; min-height: 46px; padding: 9px 12px;
       display: flex; align-items: center; border-radius: 10px;
     }
-    .st-key-sidebar_profile_action button,
-    .st-key-sidebar_logout_action button,
-    .st-key-sidebar_change_league_action button {
-      min-height: 34px !important; height: 34px !important; padding: 5px 10px !important;
-      font-size: 0.86rem !important; line-height: 1.1 !important;
+    [data-testid="stSidebar"] [data-testid="stButton"] button {
+      box-sizing: border-box !important; width: auto !important;
+      min-height: 32px !important; height: 32px !important;
+      padding: 4px 9px !important; font-size: 0.82rem !important;
+      line-height: 1 !important;
     }
-    @media (max-width: 768px) {
-      .st-key-sidebar_nav_desktop { display: none !important; }
-      .st-key-sidebar_nav_mobile { display: block !important; }
-    }
-    @media (min-width: 769px) {
-      .st-key-sidebar_nav_mobile { display: none !important; }
-      .st-key-sidebar_nav_desktop { display: block !important; }
+    [data-testid="stSidebar"] [data-testid="stButton"] button p {
+      font-size: 0.82rem !important; line-height: 1 !important; margin: 0 !important;
     }
     </style>
     """, unsafe_allow_html=True)
-    with st.sidebar:
-        with st.container(key="sidebar_nav_desktop"):
-            st.radio("Navigare", pages, format_func=lambda item: navigation_labels[item],
-                     key="main_navigation_desktop", label_visibility="collapsed")
-        with st.container(key="sidebar_nav_mobile"):
-            st.selectbox("Navigare", pages, format_func=lambda item: navigation_labels[item],
-                         key="main_navigation_mobile", label_visibility="collapsed", width="stretch")
-    page = current_navigation
+    page = st.sidebar.radio("Navigare", pages,
+        format_func=lambda item: navigation_labels[item], key="main_navigation",
+        label_visibility="collapsed")
 
     if page == "Alegerea mea" and is_guest:
         render_guest_player_choice(data, path, guest_entry["invitation"])
