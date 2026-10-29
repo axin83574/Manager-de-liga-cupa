@@ -1675,16 +1675,16 @@ def _live_clock(live):
         elapsed = added * 60
         effective = "prelungiri1_expirate" if stage == "prelungiri1" else "prelungiri2_expirate"
     if stage == "repriza1":
-        minute = min(half, elapsed // 60)
+        minute = min(half, elapsed // 60 + 1)
         shown = f"{minute}′"
-        number = max(1, minute)
+        number = minute
     elif stage == "prelungiri1":
-        extra_elapsed = min(added, elapsed // 60)
+        extra_elapsed = min(added, elapsed // 60 + 1)
         shown = f"{half}+{extra_elapsed}′"
         number = half + extra_elapsed
     elif stage in {"pauza", "repriza2", "prelungiri2", "repriza2_expirata", "prelungiri2_expirate"}:
         if stage in {"prelungiri2", "prelungiri2_expirate"}:
-            extra_elapsed = min(added, elapsed // 60)
+            extra_elapsed = min(added, elapsed // 60 + 1)
             shown = f"{half * 2}+{extra_elapsed}′"
             number = half * 2 + extra_elapsed
         else:
@@ -1711,7 +1711,7 @@ def _live_clock_text(live):
     _, _, _, elapsed = _live_clock(live)
     minutes, seconds = divmod(elapsed, 60)
     if stage == "repriza2":
-        minute = min(half * 2, half + minutes + 1)
+        minute = min(half * 2, half + minutes)
         return f"{minute:02d}:{seconds:02d}"
     if stage == "prelungiri1":
         return f"{half}+{minutes:02d}:{seconds:02d}"
@@ -1724,6 +1724,23 @@ def _live_clock_text(live):
     if stage == "final":
         return "Final"
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def _live_event_minute(live, phase, elapsed):
+    """Map elapsed seconds to the football minute interval, rounding up."""
+    half = max(1, int(live.get("half_minutes", 45) or 45))
+    minute_in_period = int(elapsed) // 60 + 1
+    if phase == "repriza1":
+        minute = min(half, minute_in_period)
+        return minute, f"{minute}′"
+    if phase == "prelungiri1":
+        return half + minute_in_period, f"{half}+{minute_in_period}′"
+    if phase == "repriza2":
+        minute = min(half * 2, half + minute_in_period)
+        return minute, f"{minute}′"
+    if phase == "prelungiri2":
+        return half * 2 + minute_in_period, f"{half * 2}+{minute_in_period}′"
+    return minute_in_period, f"{minute_in_period}′"
 
 
 def _live_set_running(live, running):
@@ -1922,8 +1939,7 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                 elif event_type == "Schimbare" and (not incoming or incoming == "—"):
                     st.error("Alege jucătorul care intră.")
                 else:
-                    event_minute = minute_number
-                    display_minute = shown_minute if "+" in shown_minute else f"{minute_number}′"
+                    event_minute, display_minute = _live_event_minute(live, phase, elapsed)
                     event = {"echipa": event_team, "minut": event_minute,
                              "afișaj_minut": display_minute, "tip": event_type,
                              "jucator": player_name}
