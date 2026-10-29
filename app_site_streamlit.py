@@ -3299,7 +3299,7 @@ def main():
             st.warning("Supabase nu este conectat: ligile se salvează doar local și se pot pierde când aplicația repornește. Verifică SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY în Secrets.")
         with st.expander("⚙️ Administrează ligile mele", expanded=False):
             render_league_management(username, paths)
-        create_col, enter_col = st.columns(2, gap="large")
+        enter_col, create_col = st.columns(2, gap="large")
         with create_col:
             with st.container(border=True):
                 st.markdown("### ➕ Creează o ligă")
