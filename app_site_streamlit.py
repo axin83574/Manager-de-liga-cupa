@@ -340,7 +340,11 @@ for _language, _title in {
 
 def tr(text):
     language = st.session_state.get("ui_language", "ro")
-    return UI_TRANSLATIONS.get(language, {}).get(str(text), text)
+    phrase = str(text)
+    translated = UI_TRANSLATIONS.get(language, {}).get(phrase)
+    if translated is None and language != "ro":
+        translated = UI_TRANSLATIONS.get("en", {}).get(phrase)
+    return phrase if translated is None else translated
 
 
 def language_label(language_code):
@@ -364,6 +368,40 @@ def render_language_selector(username=None, key="language_selector"):
         st.rerun()
     if selected_code in {"ar", "arz", "ur"}:
         st.markdown("<style>[data-testid='stAppViewContainer'],[data-testid='stSidebar']{direction:rtl;text-align:right} [data-testid='stMarkdownContainer'],[data-testid='stWidgetLabel']{text-align:right}</style>", unsafe_allow_html=True)
+
+
+def install_ui_translations():
+    """Translate Streamlit labels and messages centrally as catalogs grow."""
+    method_names = ("title", "header", "subheader", "caption", "markdown", "write", "info",
+        "warning", "error", "success", "button", "text_input", "text_area", "number_input",
+        "selectbox", "multiselect", "radio", "checkbox", "form_submit_button", "expander",
+        "tabs", "download_button", "file_uploader", "metric", "date_input")
+
+    def translate_value(value):
+        if isinstance(value, str):
+            return tr(value)
+        if isinstance(value, (list, tuple)):
+            return type(value)(translate_value(item) for item in value)
+        return value
+
+    for method_name in method_names:
+        original = getattr(st, method_name, None)
+        if not callable(original) or getattr(original, "_league_i18n", False):
+            continue
+
+        def localized(*args, _original=original, _name=method_name, **kwargs):
+            if args:
+                args = (translate_value(args[0]), *args[1:])
+            elif "label" in kwargs:
+                kwargs["label"] = translate_value(kwargs["label"])
+            if _name == "tabs" and args:
+                args = (translate_value(args[0]), *args[1:])
+            if _name in {"selectbox", "multiselect", "radio"} and "format_func" not in kwargs:
+                kwargs["format_func"] = tr
+            return _original(*args, **kwargs)
+
+        localized._league_i18n = True
+        setattr(st, method_name, localized)
 
 BASE_DIR = Path(os.environ.get("LIGA_DATA_DIR", Path(__file__).resolve().parent / "ligi"))
 APP_DIR = Path(__file__).resolve().parent
@@ -3388,6 +3426,7 @@ def auth_view(cookie_manager):
 def main():
     st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide",
                        initial_sidebar_state="auto")
+    install_ui_translations()
     cookie_manager = stx.CookieManager(key="persistent_cookie_manager")
     # Tema este fixată pe întunecat pentru a evita diferențele de contrast
     # dintre componentele Streamlit și stilurile personalizate.
