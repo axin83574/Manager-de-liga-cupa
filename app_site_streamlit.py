@@ -2954,8 +2954,6 @@ def render_account_profile(username, profile, paths, player_only=False):
     else:
         st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
 
-    render_player_dashboard(username, profile, paths)
-
 def auth_view(cookie_manager):
     st.markdown("## Intră în cont sau creează un profil")
     st.caption("Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului.")
