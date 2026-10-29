@@ -348,7 +348,15 @@ def create_account(username, email, password, name, birthday, plays_professional
     return normalized_username
 
 
-def get_user_leagues(username):
+def get_user_leagues(username, include_hidden=False):
+    users = load_users()
+    account = users.get(username.casefold(), {})
+    hidden = set(account.get("ligii_ascunse", [])) if isinstance(account, dict) else set()
+
+    def favorite_first(entries):
+        favorite = account.get("liga_preferata") if isinstance(account, dict) else None
+        return sorted(entries, key=lambda entry: league_key(entry) != favorite)
+
     if SUPABASE_ENABLED:
         entries = []
         for row in all_db_league_rows():
@@ -364,7 +372,11 @@ def get_user_leagues(username):
             if role:
                 entries.append({"path": db_league_path(owner, row["id"]), "role": role,
                                 "owner": owner, "updated_at": row.get("updated_at", "")})
-        return sorted(entries, key=lambda entry: entry.get("updated_at", ""), reverse=True)
+        entries.sort(key=lambda entry: entry.get("updated_at", ""), reverse=True)
+        entries = favorite_first(entries)
+        if include_hidden:
+            return entries
+        return [entry for entry in entries if league_key(entry) not in hidden]
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     entries = []
     own_dir = BASE_DIR / username
@@ -383,7 +395,12 @@ def get_user_leagues(username):
                            if str(m.get("username", "")).casefold() == username.casefold()), None)
             if access and access.get("activ", True):
                 entries.append({"path": path, "role": access.get("rol", "vizitator"), "owner": folder.name})
-    return sorted(entries, key=lambda entry: entry["path"].stat().st_mtime, reverse=True)
+    entries.sort(key=lambda entry: entry["path"].stat().st_mtime if Path(entry["path"]).exists() else 0,
+                 reverse=True)
+    entries = favorite_first(entries)
+    if include_hidden:
+        return entries
+    return [entry for entry in entries if league_key(entry) not in hidden]
 
 
 def league_key(entry):
@@ -665,6 +682,8 @@ def delete_user_league(username, entry):
         if not isinstance(selections, dict):
             selections = record["selectii_ligi"] = {}
         selections.pop(key, None)
+        if record.get("liga_preferata") == key:
+            record.pop("liga_preferata", None)
         try:
             save_users(users)
         except Exception:
@@ -2591,17 +2610,22 @@ def render_guest_player_choice(data, path, invitation):
 
 
 def render_league_management(username, paths):
-    owned = [entry for entry in paths if entry.get("role") == "owner"
-             and str(entry.get("owner", "")).casefold() == username.casefold()]
+    accessible = get_user_leagues(username, include_hidden=True)
+    users = load_users()
+    account = users.get(username.casefold(), {})
+    favorite_key = account.get("liga_preferata") if isinstance(account, dict) else None
+    hidden_keys = set(account.get("ligii_ascunse", [])) if isinstance(account, dict) else set()
     st.subheader("Administrare ligi")
-    st.caption("Aici poți deschide sau șterge ligile create de tine.")
-    if not owned:
-        st.info("Nu ai ligi create în acest cont.")
+    st.caption("Alege liga preferată ca să apară prima sau elimină o ligă din lista acestui cont. Datele ligii rămân salvate.")
+    if not accessible:
+        st.info("Nu ai ligi în acest cont.")
         return
     pending_key = "confirm_delete_league"
-    for entry in owned:
+    for entry in accessible:
         path = Path(entry["path"])
         league_key_value = league_key(entry)
+        is_owner = entry.get("role") == "owner" and str(entry.get("owner", "")).casefold() == username.casefold()
+        is_hidden = league_key_value in hidden_keys
         try:
             league_data = load_league(path)
             name = league_data.get("nume_liga", path.stem)
@@ -2612,29 +2636,55 @@ def render_league_management(username, paths):
             st.warning(f"Nu am putut încărca detaliile pentru liga «{name}»: {exc}")
         token = safe_slug(path.stem)
         with st.container(border=True):
-            details, open_col, delete_col = st.columns([5, 1.3, 1.2])
-            details.markdown(f"### {name}")
-            details.caption(f"{teams} echipe · {matches} meciuri")
-            if open_col.button("Deschide", key=f"manage_open_{token}", width="stretch"):
+            details, open_col, favorite_col, delete_col = st.columns([4.2, 1.1, 1.5, 1.1])
+            star = " ⭐ Preferată" if league_key_value == favorite_key else ""
+            details.markdown(f"### {name}{star}" + (" · Ascunsă" if is_hidden else ""))
+            details.caption(f"{teams} echipe · {matches} meciuri · {'creată de tine' if is_owner else 'partajată'}")
+            if not is_hidden and open_col.button("Deschide", key=f"manage_open_{token}", width="stretch"):
                 st.session_state["entered_league"] = league_key_value
                 st.session_state.pop("show_account_profile", None)
                 st.rerun()
-            if delete_col.button("Șterge", key=f"manage_delete_{token}", width="stretch"):
+            if not is_hidden and favorite_col.button("Preferată" if league_key_value != favorite_key else "★ Preferată",
+                                                      key=f"manage_favorite_{token}", width="stretch",
+                                                      disabled=league_key_value == favorite_key):
+                fresh_users = load_users()
+                fresh_account = fresh_users.get(username.casefold())
+                if fresh_account is not None:
+                    fresh_account["liga_preferata"] = league_key_value
+                    save_users(fresh_users)
+                    st.success(f"«{name}» este acum liga ta preferată.")
+                    st.rerun()
+            button_label = "Afișează" if is_hidden else "Elimină"
+            if delete_col.button(button_label, key=f"manage_delete_{token}", width="stretch"):
                 st.session_state[pending_key] = league_key_value
                 st.rerun()
             if st.session_state.get(pending_key) == league_key_value:
-                st.warning(f"Ștergi definitiv liga «{name}» și toate datele ei? Acțiunea nu poate fi anulată.")
+                st.warning((f"Afișezi din nou liga «{name}» în lista acestui cont?" if is_hidden else
+                            f"Elimini liga «{name}» doar din lista acestui cont? Datele ei nu vor fi șterse."))
                 confirm_col, cancel_col = st.columns(2)
-                if confirm_col.button("Da, șterge liga", type="primary", key=f"manage_confirm_{token}"):
+                confirm_label = "Da, afișeaz-o" if is_hidden else "Da, elimin-o din listă"
+                if confirm_col.button(confirm_label, type="primary", key=f"manage_confirm_{token}"):
                     try:
-                        deleted_key = delete_user_league(username, entry)
-                        if st.session_state.get("entered_league") == deleted_key:
+                        fresh_users = load_users()
+                        fresh_account = fresh_users.get(username.casefold())
+                        if fresh_account is None:
+                            raise ValueError("Contul nu a fost găsit.")
+                        current_hidden = set(fresh_account.get("ligii_ascunse", []))
+                        if is_hidden:
+                            current_hidden.discard(league_key_value)
+                        else:
+                            current_hidden.add(league_key_value)
+                        fresh_account["ligii_ascunse"] = sorted(current_hidden)
+                        if not is_hidden and fresh_account.get("liga_preferata") == league_key_value:
+                            fresh_account.pop("liga_preferata", None)
+                        save_users(fresh_users)
+                        if not is_hidden and st.session_state.get("entered_league") == league_key_value:
                             st.session_state.pop("entered_league", None)
-                        if st.session_state.get("arbitraj_league_key") == deleted_key:
+                        if not is_hidden and st.session_state.get("arbitraj_league_key") == league_key_value:
                             st.session_state.pop("arbitraj_league_key", None)
                             st.session_state.pop("arbitraj_fixture_id", None)
                         st.session_state.pop(pending_key, None)
-                        st.success(f"Liga «{name}» a fost ștearsă.")
+                        st.success(f"Liga «{name}» a fost {'afișată din nou' if is_hidden else 'eliminată din listă'}. Datele au rămas salvate.")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Liga nu a putut fi ștearsă: {exc}")
@@ -3247,6 +3297,8 @@ def main():
         st.caption("Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată.")
         if not SUPABASE_ENABLED:
             st.warning("Supabase nu este conectat: ligile se salvează doar local și se pot pierde când aplicația repornește. Verifică SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY în Secrets.")
+        with st.expander("⚙️ Administrează ligile mele", expanded=False):
+            render_league_management(username, paths)
         create_col, enter_col = st.columns(2, gap="large")
         with create_col:
             with st.container(border=True):
