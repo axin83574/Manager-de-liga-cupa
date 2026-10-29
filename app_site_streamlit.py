@@ -36,6 +36,335 @@ POZITII_FOTBAL = (
 TIPURI_GOL = ("Gol Normal", "Gol din Lovitură Liberă", "Penalty")
 TIPURI_EVENIMENT = TIPURI_GOL + ("Autogol", "Penalty Ratat",
                                  "Cartonaș Galben", "Cartonaș Roșu", "Schimbare")
+LANGUAGE_OPTIONS = {
+    "Română": "ro", "English": "en", "中文（简体）": "zh", "हिन्दी": "hi",
+    "Español": "es", "العربية": "ar", "Français": "fr", "বাংলা": "bn",
+    "Português": "pt", "Bahasa Indonesia": "id", "اردو": "ur", "Русский": "ru",
+    "Deutsch": "de", "日本語": "ja", "Nigerian Pidgin": "pcm", "العربية المصرية": "arz",
+}
+UI_TRANSLATIONS = {
+    "en": {
+        "Limba": "Language", "Profilul meu": "My profile", "Jucătorul meu": "My player",
+        "Deconectare": "Log out", "Schimbă liga": "Change league", "Navigare": "Navigation",
+        "Intră în cont sau creează un profil": "Sign in or create an account",
+        "Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului.": "Sign in with your username or the email address linked to your account.",
+        "Autentificare": "Sign in", "Cont nou": "Create account", "Nume de utilizator sau e-mail": "Username or email",
+        "Nume de utilizator": "Username", "Parolă": "Password", "Intră în cont": "Sign in",
+        "Rămâi conectat pe acest dispozitiv (30 de zile)": "Stay signed in on this device (30 days)",
+        "Profilul rămâne disponibil indiferent de liga deschisă.": "Your profile is available no matter which league is open.",
+        "Datele contului": "Account details", "Schimbă parola": "Change password",
+        "Asocierea cu jucătorii din ligile tale": "Link your player in each league",
+        "Salvează asocierea": "Save player selection", "Statisticile mele": "My statistics",
+        "Meciuri jucate": "Played matches", "Urmează": "Upcoming", "Live": "Live",
+        "Trofee": "Trophies", "Echipele mele": "My teams", "Goluri": "Goals",
+        "Assisturi": "Assists", "Cartonașe galbene": "Yellow cards", "Cartonașe roșii": "Red cards",
+        "Omul meciului": "Player of the match", "Pe fiecare ligă": "By league",
+        "Trofee câștigate": "Trophies won", "Ligă": "League", "Echipă": "Team",
+        "Jucător": "Player", "Etapa": "Round", "Competiție": "Competition", "Data": "Date", "Meci": "Match",
+        "Echipă aleasă": "Selected team", "Jucător ales": "Selected player",
+        "Echipă actuală după transferuri": "Current team after transfers",
+        "Asociază-ți un jucător în cel puțin o ligă din secțiunea de mai sus. Aici apar doar ligile în care ai ales un jucător.":
+            "Link yourself to a player in at least one league above. Only leagues where you selected a player appear here.",
+        "Intră în ligă": "Join a league", "Creează o ligă": "Create a league",
+        "Bine ai venit în Managerul Ligii de Fotbal": "Welcome to Football League Manager",
+        "Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată.":
+            "Create a league or join one you manage or that has been shared with you.",
+        "Administrează ligile mele": "Manage my leagues", "Alege liga": "Choose a league",
+        "Importă o ligă existentă": "Import an existing league", "Continuă cu codul": "Continue with code",
+        "Clasament": "Standings", "Statistici": "Statistics", "Echipe și jucători": "Teams and players",
+        "Meciuri și program": "Matches and schedule", "Arbitraj": "Refereeing", "Cupa": "Cup",
+        "Supercupa": "Super Cup", "Premii sezon": "Season awards", "Transferuri": "Transfers",
+        "Membri": "Members", "Import / export": "Import / export", "Setări ligă": "League settings",
+        "Înapoi la aplicație": "Back to the app", "Numele ligii": "League name",
+        "Creează liga": "Create league", "Ligă goală": "Empty league", "Tipul competiției": "Competition type",
+        "Adresă de e-mail": "Email address", "Nume și prenume": "Full name",
+        "Confirmă parola": "Confirm password", "Parolă (minimum 6 caractere)": "Password (at least 6 characters)",
+        "Joci la un club profesionist?": "Do you play for a professional club?", "Poziția ta": "Your position",
+        "Salvează profilul": "Save profile", "Echipa": "Team", "Deschide": "Open",
+        "Alegeri de profil și administrare ligi": "Player selection and league management",
+        "Câștigat ca": "Won as", "Proprietar": "Owner", "Galbene": "Yellow cards", "Roșii": "Red cards",
+        "Liga": "League", "Administrare ligi": "League management", "Salvează alegerea": "Save selection",
+        "Numele de utilizator sau parola nu corespund.": "The username or password is incorrect.",
+        "Statistici": "Statistics", "În desfășurare": "In progress", "Nesetată": "Not set",
+    },
+    "es": {
+        "Limba": "Idioma", "Profilul meu": "Mi perfil", "Jucătorul meu": "Mi jugador",
+        "Deconectare": "Cerrar sesión", "Schimbă liga": "Cambiar de liga", "Navigare": "Navegación",
+        "Intră în cont sau creează un profil": "Inicia sesión o crea una cuenta",
+        "Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului.": "Inicia sesión con tu nombre de usuario o el correo asociado a tu cuenta.",
+        "Autentificare": "Iniciar sesión", "Cont nou": "Crear cuenta", "Nume de utilizator sau e-mail": "Usuario o correo electrónico",
+        "Nume de utilizator": "Nombre de usuario", "Parolă": "Contraseña", "Intră în cont": "Iniciar sesión",
+        "Rămâi conectat pe acest dispozitiv (30 de zile)": "Mantener la sesión en este dispositivo (30 días)",
+        "Profilul rămâne disponibil indiferent de liga deschisă.": "Tu perfil está disponible independientemente de la liga abierta.",
+        "Datele contului": "Datos de la cuenta", "Schimbă parola": "Cambiar contraseña",
+        "Asocierea cu jucătorii din ligile tale": "Vincula tu jugador en cada liga",
+        "Salvează asocierea": "Guardar selección de jugador", "Statisticile mele": "Mis estadísticas",
+        "Meciuri jucate": "Partidos jugados", "Urmează": "Próximos", "Live": "En directo",
+        "Trofee": "Trofeos", "Echipele mele": "Mis equipos", "Goluri": "Goles",
+        "Assisturi": "Asistencias", "Cartonașe galbene": "Tarjetas amarillas", "Cartonașe roșii": "Tarjetas rojas",
+        "Omul meciului": "Jugador del partido", "Pe fiecare ligă": "Por liga",
+        "Trofee câștigate": "Trofeos ganados", "Ligă": "Liga", "Echipă": "Equipo",
+        "Jucător": "Jugador", "Etapa": "Jornada", "Competiție": "Competición", "Data": "Fecha", "Meci": "Partido",
+        "Echipă aleasă": "Equipo seleccionado", "Jucător ales": "Jugador seleccionado",
+        "Echipă actuală după transferuri": "Equipo actual tras los traspasos",
+        "Asociază-ți un jucător în cel puțin o ligă din secțiunea de mai sus. Aici apar doar ligile în care ai ales un jucător.":
+            "Vincúlate a un jugador en al menos una liga de arriba. Aquí solo aparecen las ligas donde elegiste un jugador.",
+        "Intră în ligă": "Entrar en una liga", "Creează o ligă": "Crear una liga",
+        "Bine ai venit în Managerul Ligii de Fotbal": "Bienvenido al Gestor de Ligas de Fútbol",
+        "Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată.":
+            "Crea una liga o únete a una que administres o que hayan compartido contigo.",
+        "Administrează ligile mele": "Gestionar mis ligas", "Alege liga": "Elige una liga",
+        "Importă o ligă existentă": "Importar una liga existente", "Continuă cu codul": "Continuar con código",
+        "Clasament": "Clasificación", "Statistici": "Estadísticas", "Echipe și jucători": "Equipos y jugadores",
+        "Meciuri și program": "Partidos y calendario", "Arbitraj": "Arbitraje", "Cupa": "Copa",
+        "Supercupa": "Supercopa", "Premii sezon": "Premios de temporada", "Transferuri": "Traspasos",
+        "Membri": "Miembros", "Import / export": "Importar / exportar", "Setări ligă": "Configuración de liga",
+        "Înapoi la aplicație": "Volver a la aplicación", "Numele ligii": "Nombre de la liga",
+        "Creează liga": "Crear liga", "Ligă goală": "Liga vacía", "Tipul competiției": "Tipo de competición",
+        "Adresă de e-mail": "Correo electrónico", "Nume și prenume": "Nombre completo",
+        "Confirmă parola": "Confirmar contraseña", "Parolă (minimum 6 caractere)": "Contraseña (mínimo 6 caracteres)",
+        "Joci la un club profesionist?": "¿Juegas en un club profesional?", "Poziția ta": "Tu posición",
+        "Salvează profilul": "Guardar perfil", "Echipa": "Equipo", "Deschide": "Abrir",
+        "Câștigat ca": "Ganado como", "Proprietar": "Propietario", "Galbene": "Amarillas", "Roșii": "Rojas",
+        "Liga": "Liga", "Administrare ligi": "Gestión de ligas", "Salvează alegerea": "Guardar selección",
+        "Statistici": "Estadísticas", "În desfășurare": "En curso", "Nesetată": "Sin fecha",
+    },
+}
+
+UI_TRANSLATIONS.update({
+    "zh": {
+        "Limba": "语言", "Profilul meu": "我的个人资料", "Jucătorul meu": "我的球员", "Deconectare": "退出登录",
+        "Schimbă liga": "切换联赛", "Navigare": "导航", "Autentificare": "登录", "Cont nou": "创建账户",
+        "Nume de utilizator sau e-mail": "用户名或邮箱", "Parolă": "密码", "Intră în cont": "登录",
+        "Statisticile mele": "我的统计", "Meciuri jucate": "已进行的比赛", "Urmează": "即将进行", "Live": "直播",
+        "Trofee": "奖杯", "Echipele mele": "我的球队", "Goluri": "进球", "Assisturi": "助攻",
+        "Cartonașe galbene": "黄牌", "Cartonașe roșii": "红牌", "Omul meciului": "全场最佳球员",
+        "Pe fiecare ligă": "各联赛统计", "Trofee câștigate": "获得的奖杯", "Ligă": "联赛", "Echipă": "球队",
+        "Jucător": "球员", "Etapa": "轮次", "Competiție": "赛事", "Data": "日期", "Meci": "比赛",
+        "Intră în ligă": "加入联赛", "Creează o ligă": "创建联赛", "Clasament": "排名", "Statistici": "统计",
+        "Echipe și jucători": "球队和球员", "Meciuri și program": "比赛和赛程", "Arbitraj": "裁判", "Cupa": "杯赛",
+        "Supercupa": "超级杯", "Premii sezon": "赛季奖项", "Transferuri": "转会", "Membri": "成员",
+        "Import / export": "导入 / 导出", "Setări ligă": "联赛设置", "Bine ai venit în Managerul Ligii de Fotbal": "欢迎使用足球联赛管理器",
+        "Numele ligii": "联赛名称", "Creează liga": "创建联赛", "Tipul competiției": "赛事类型",
+    },
+    "hi": {
+        "Limba": "भाषा", "Profilul meu": "मेरी प्रोफ़ाइल", "Jucătorul meu": "मेरा खिलाड़ी", "Deconectare": "लॉग आउट",
+        "Schimbă liga": "लीग बदलें", "Navigare": "नेविगेशन", "Autentificare": "लॉग इन", "Cont nou": "नया खाता",
+        "Nume de utilizator sau e-mail": "उपयोगकर्ता नाम या ईमेल", "Parolă": "पासवर्ड", "Intră în cont": "लॉग इन करें",
+        "Statisticile mele": "मेरे आँकड़े", "Meciuri jucate": "खेले गए मैच", "Urmează": "आगामी", "Live": "लाइव",
+        "Trofee": "ट्रॉफ़ियाँ", "Echipele mele": "मेरी टीमें", "Goluri": "गोल", "Assisturi": "असिस्ट",
+        "Cartonașe galbene": "पीले कार्ड", "Cartonașe roșii": "लाल कार्ड", "Omul meciului": "मैच का सर्वश्रेष्ठ खिलाड़ी",
+        "Pe fiecare ligă": "हर लीग के आँकड़े", "Trofee câștigate": "जीती गई ट्रॉफ़ियाँ", "Ligă": "लीग", "Echipă": "टीम",
+        "Jucător": "खिलाड़ी", "Etapa": "राउंड", "Competiție": "प्रतियोगिता", "Data": "तारीख", "Meci": "मैच",
+        "Intră în ligă": "लीग में शामिल हों", "Creează o ligă": "लीग बनाएँ", "Clasament": "तालिका", "Statistici": "आँकड़े",
+        "Echipe și jucători": "टीमें और खिलाड़ी", "Meciuri și program": "मैच और कार्यक्रम", "Arbitraj": "रेफ़री", "Cupa": "कप",
+        "Supercupa": "सुपर कप", "Premii sezon": "सीज़न पुरस्कार", "Transferuri": "ट्रांसफ़र", "Membri": "सदस्य",
+        "Import / export": "आयात / निर्यात", "Setări ligă": "लीग सेटिंग्स", "Bine ai venit în Managerul Ligii de Fotbal": "फुटबॉल लीग मैनेजर में आपका स्वागत है",
+        "Numele ligii": "लीग का नाम", "Creează liga": "लीग बनाएँ", "Tipul competiției": "प्रतियोगिता का प्रकार",
+    },
+    "fr": {
+        "Limba": "Langue", "Profilul meu": "Mon profil", "Jucătorul meu": "Mon joueur", "Deconectare": "Déconnexion",
+        "Schimbă liga": "Changer de ligue", "Navigare": "Navigation", "Autentificare": "Connexion", "Cont nou": "Nouveau compte",
+        "Nume de utilizator sau e-mail": "Nom d’utilisateur ou e-mail", "Parolă": "Mot de passe", "Intră în cont": "Se connecter",
+        "Statisticile mele": "Mes statistiques", "Meciuri jucate": "Matchs joués", "Urmează": "À venir", "Live": "En direct",
+        "Trofee": "Trophées", "Echipele mele": "Mes équipes", "Goluri": "Buts", "Assisturi": "Passes décisives",
+        "Cartonașe galbene": "Cartons jaunes", "Cartonașe roșii": "Cartons rouges", "Omul meciului": "Joueur du match",
+        "Pe fiecare ligă": "Par ligue", "Trofee câștigate": "Trophées remportés", "Ligă": "Ligue", "Echipă": "Équipe",
+        "Jucător": "Joueur", "Etapa": "Journée", "Competiție": "Compétition", "Data": "Date", "Meci": "Match",
+        "Intră în ligă": "Rejoindre une ligue", "Creează o ligă": "Créer une ligue", "Clasament": "Classement", "Statistici": "Statistiques",
+        "Echipe și jucători": "Équipes et joueurs", "Meciuri și program": "Matchs et calendrier", "Arbitraj": "Arbitrage", "Cupa": "Coupe",
+        "Supercupa": "Supercoupe", "Premii sezon": "Prix de la saison", "Transferuri": "Transferts", "Membri": "Membres",
+        "Import / export": "Importer / exporter", "Setări ligă": "Paramètres de la ligue", "Bine ai venit în Managerul Ligii de Fotbal": "Bienvenue dans le gestionnaire de ligue de football",
+        "Numele ligii": "Nom de la ligue", "Creează liga": "Créer la ligue", "Tipul competiției": "Type de compétition",
+    },
+    "bn": {
+        "Limba": "ভাষা", "Profilul meu": "আমার প্রোফাইল", "Jucătorul meu": "আমার খেলোয়াড়", "Deconectare": "লগ আউট",
+        "Schimbă liga": "লিগ পরিবর্তন", "Navigare": "নেভিগেশন", "Autentificare": "লগ ইন", "Cont nou": "নতুন অ্যাকাউন্ট",
+        "Nume de utilizator sau e-mail": "ব্যবহারকারীর নাম বা ইমেল", "Parolă": "পাসওয়ার্ড", "Intră în cont": "লগ ইন করুন",
+        "Statisticile mele": "আমার পরিসংখ্যান", "Meciuri jucate": "খেলা ম্যাচ", "Urmează": "আসন্ন", "Live": "লাইভ",
+        "Trofee": "ট্রফি", "Echipele mele": "আমার দল", "Goluri": "গোল", "Assisturi": "অ্যাসিস্ট",
+        "Cartonașe galbene": "হলুদ কার্ড", "Cartonașe roșii": "লাল কার্ড", "Omul meciului": "ম্যাচসেরা খেলোয়াড়",
+        "Pe fiecare ligă": "প্রতি লিগে", "Trofee câștigate": "জেতা ট্রফি", "Ligă": "লিগ", "Echipă": "দল",
+        "Jucător": "খেলোয়াড়", "Etapa": "রাউন্ড", "Competiție": "প্রতিযোগিতা", "Data": "তারিখ", "Meci": "ম্যাচ",
+        "Intră în ligă": "লিগে যোগ দিন", "Creează o ligă": "লিগ তৈরি করুন", "Clasament": "লিগ টেবিল", "Statistici": "পরিসংখ্যান",
+        "Echipe și jucători": "দল ও খেলোয়াড়", "Meciuri și program": "ম্যাচ ও সূচি", "Arbitraj": "রেফারি", "Cupa": "কাপ",
+        "Supercupa": "সুপার কাপ", "Premii sezon": "মৌসুমের পুরস্কার", "Transferuri": "ট্রান্সফার", "Membri": "সদস্য",
+        "Import / export": "ইমপোর্ট / এক্সপোর্ট", "Setări ligă": "লিগ সেটিংস", "Bine ai venit în Managerul Ligii de Fotbal": "ফুটবল লিগ ম্যানেজারে স্বাগতম",
+        "Numele ligii": "লিগের নাম", "Creează liga": "লিগ তৈরি করুন", "Tipul competiției": "প্রতিযোগিতার ধরন",
+    },
+    "pt": {
+        "Limba": "Idioma", "Profilul meu": "Meu perfil", "Jucătorul meu": "Meu jogador", "Deconectare": "Sair",
+        "Schimbă liga": "Trocar de liga", "Navigare": "Navegação", "Autentificare": "Entrar", "Cont nou": "Nova conta",
+        "Nume de utilizator sau e-mail": "Usuário ou e-mail", "Parolă": "Senha", "Intră în cont": "Entrar",
+        "Statisticile mele": "Minhas estatísticas", "Meciuri jucate": "Partidas disputadas", "Urmează": "Próximas", "Live": "Ao vivo",
+        "Trofee": "Troféus", "Echipele mele": "Meus times", "Goluri": "Gols", "Assisturi": "Assistências",
+        "Cartonașe galbene": "Cartões amarelos", "Cartonașe roșii": "Cartões vermelhos", "Omul meciului": "Melhor jogador da partida",
+        "Pe fiecare ligă": "Por liga", "Trofee câștigate": "Troféus conquistados", "Ligă": "Liga", "Echipă": "Time",
+        "Jucător": "Jogador", "Etapa": "Rodada", "Competiție": "Competição", "Data": "Data", "Meci": "Partida",
+        "Intră în ligă": "Entrar em uma liga", "Creează o ligă": "Criar uma liga", "Clasament": "Classificação", "Statistici": "Estatísticas",
+        "Echipe și jucători": "Times e jogadores", "Meciuri și program": "Partidas e calendário", "Arbitraj": "Arbitragem", "Cupa": "Copa",
+        "Supercupa": "Supercopa", "Premii sezon": "Prêmios da temporada", "Transferuri": "Transferências", "Membri": "Membros",
+        "Import / export": "Importar / exportar", "Setări ligă": "Configurações da liga", "Bine ai venit în Managerul Ligii de Fotbal": "Bem-vindo ao Gerenciador de Ligas de Futebol",
+        "Numele ligii": "Nome da liga", "Creează liga": "Criar liga", "Tipul competiției": "Tipo de competição",
+    },
+    "id": {
+        "Limba": "Bahasa", "Profilul meu": "Profil saya", "Jucătorul meu": "Pemain saya", "Deconectare": "Keluar",
+        "Schimbă liga": "Ganti liga", "Navigare": "Navigasi", "Autentificare": "Masuk", "Cont nou": "Akun baru",
+        "Nume de utilizator sau e-mail": "Nama pengguna atau email", "Parolă": "Kata sandi", "Intră în cont": "Masuk",
+        "Statisticile mele": "Statistik saya", "Meciuri jucate": "Pertandingan dimainkan", "Urmează": "Jadwal berikutnya", "Live": "Langsung",
+        "Trofee": "Trofi", "Echipele mele": "Tim saya", "Goluri": "Gol", "Assisturi": "Assist",
+        "Cartonașe galbene": "Kartu kuning", "Cartonașe roșii": "Kartu merah", "Omul meciului": "Pemain terbaik pertandingan",
+        "Pe fiecare ligă": "Per liga", "Trofee câștigate": "Trofi yang dimenangkan", "Ligă": "Liga", "Echipă": "Tim",
+        "Jucător": "Pemain", "Etapa": "Babak", "Competiție": "Kompetisi", "Data": "Tanggal", "Meci": "Pertandingan",
+        "Intră în ligă": "Gabung liga", "Creează o ligă": "Buat liga", "Clasament": "Klasemen", "Statistici": "Statistik",
+        "Echipe și jucători": "Tim dan pemain", "Meciuri și program": "Pertandingan dan jadwal", "Arbitraj": "Wasit", "Cupa": "Piala",
+        "Supercupa": "Piala Super", "Premii sezon": "Penghargaan musim", "Transferuri": "Transfer", "Membri": "Anggota",
+        "Import / export": "Impor / ekspor", "Setări ligă": "Pengaturan liga", "Bine ai venit în Managerul Ligii de Fotbal": "Selamat datang di Manajer Liga Sepak Bola",
+        "Numele ligii": "Nama liga", "Creează liga": "Buat liga", "Tipul competiției": "Jenis kompetisi",
+    },
+    "ru": {
+        "Limba": "Язык", "Profilul meu": "Мой профиль", "Jucătorul meu": "Мой игрок", "Deconectare": "Выйти",
+        "Schimbă liga": "Сменить лигу", "Navigare": "Навигация", "Autentificare": "Вход", "Cont nou": "Новый аккаунт",
+        "Nume de utilizator sau e-mail": "Имя пользователя или эл. почта", "Parolă": "Пароль", "Intră în cont": "Войти",
+        "Statisticile mele": "Моя статистика", "Meciuri jucate": "Сыгранные матчи", "Urmează": "Предстоящие", "Live": "В эфире",
+        "Trofee": "Трофеи", "Echipele mele": "Мои команды", "Goluri": "Голы", "Assisturi": "Голевые передачи",
+        "Cartonașe galbene": "Жёлтые карточки", "Cartonașe roșii": "Красные карточки", "Omul meciului": "Лучший игрок матча",
+        "Pe fiecare ligă": "По каждой лиге", "Trofee câștigate": "Выигранные трофеи", "Ligă": "Лига", "Echipă": "Команда",
+        "Jucător": "Игрок", "Etapa": "Тур", "Competiție": "Соревнование", "Data": "Дата", "Meci": "Матч",
+        "Intră în ligă": "Войти в лигу", "Creează o ligă": "Создать лигу", "Clasament": "Таблица", "Statistici": "Статистика",
+        "Echipe și jucători": "Команды и игроки", "Meciuri și program": "Матчи и расписание", "Arbitraj": "Судейство", "Cupa": "Кубок",
+        "Supercupa": "Суперкубок", "Premii sezon": "Награды сезона", "Transferuri": "Трансферы", "Membri": "Участники",
+        "Import / export": "Импорт / экспорт", "Setări ligă": "Настройки лиги", "Bine ai venit în Managerul Ligii de Fotbal": "Добро пожаловать в менеджер футбольной лиги",
+        "Numele ligii": "Название лиги", "Creează liga": "Создать лигу", "Tipul competiției": "Тип соревнования",
+    },
+    "de": {
+        "Limba": "Sprache", "Profilul meu": "Mein Profil", "Jucătorul meu": "Mein Spieler", "Deconectare": "Abmelden",
+        "Schimbă liga": "Liga wechseln", "Navigare": "Navigation", "Autentificare": "Anmelden", "Cont nou": "Neues Konto",
+        "Nume de utilizator sau e-mail": "Benutzername oder E-Mail", "Parolă": "Passwort", "Intră în cont": "Anmelden",
+        "Statisticile mele": "Meine Statistiken", "Meciuri jucate": "Gespielte Spiele", "Urmează": "Anstehend", "Live": "Live",
+        "Trofee": "Pokale", "Echipele mele": "Meine Teams", "Goluri": "Tore", "Assisturi": "Vorlagen",
+        "Cartonașe galbene": "Gelbe Karten", "Cartonașe roșii": "Rote Karten", "Omul meciului": "Spieler des Spiels",
+        "Pe fiecare ligă": "Nach Liga", "Trofee câștigate": "Gewonnene Pokale", "Ligă": "Liga", "Echipă": "Mannschaft",
+        "Jucător": "Spieler", "Etapa": "Spieltag", "Competiție": "Wettbewerb", "Data": "Datum", "Meci": "Spiel",
+        "Intră în ligă": "Liga beitreten", "Creează o ligă": "Liga erstellen", "Clasament": "Tabelle", "Statistici": "Statistiken",
+        "Echipe și jucători": "Teams und Spieler", "Meciuri și program": "Spiele und Spielplan", "Arbitraj": "Schiedsrichter", "Cupa": "Pokal",
+        "Supercupa": "Superpokal", "Premii sezon": "Saisonauszeichnungen", "Transferuri": "Transfers", "Membri": "Mitglieder",
+        "Import / export": "Import / Export", "Setări ligă": "Ligaeinstellungen", "Bine ai venit în Managerul Ligii de Fotbal": "Willkommen beim Fußball-Liga-Manager",
+        "Numele ligii": "Liga-Name", "Creează liga": "Liga erstellen", "Tipul competiției": "Wettbewerbstyp",
+    },
+    "ja": {
+        "Limba": "言語", "Profilul meu": "プロフィール", "Jucătorul meu": "マイ選手", "Deconectare": "ログアウト",
+        "Schimbă liga": "リーグを変更", "Navigare": "ナビゲーション", "Autentificare": "ログイン", "Cont nou": "新しいアカウント",
+        "Nume de utilizator sau e-mail": "ユーザー名またはメール", "Parolă": "パスワード", "Intră în cont": "ログイン",
+        "Statisticile mele": "自分の成績", "Meciuri jucate": "出場試合", "Urmează": "今後の試合", "Live": "ライブ",
+        "Trofee": "トロフィー", "Echipele mele": "所属チーム", "Goluri": "ゴール", "Assisturi": "アシスト",
+        "Cartonașe galbene": "イエローカード", "Cartonașe roșii": "レッドカード", "Omul meciului": "マン・オブ・ザ・マッチ",
+        "Pe fiecare ligă": "リーグ別", "Trofee câștigate": "獲得トロフィー", "Ligă": "リーグ", "Echipă": "チーム",
+        "Jucător": "選手", "Etapa": "節", "Competiție": "大会", "Data": "日付", "Meci": "試合",
+        "Intră în ligă": "リーグに参加", "Creează o ligă": "リーグを作成", "Clasament": "順位表", "Statistici": "統計",
+        "Echipe și jucători": "チームと選手", "Meciuri și program": "試合と日程", "Arbitraj": "審判", "Cupa": "カップ戦",
+        "Supercupa": "スーパーカップ", "Premii sezon": "シーズン表彰", "Transferuri": "移籍", "Membri": "メンバー",
+        "Import / export": "インポート / エクスポート", "Setări ligă": "リーグ設定", "Bine ai venit în Managerul Ligii de Fotbal": "サッカーリーグ管理へようこそ",
+        "Numele ligii": "リーグ名", "Creează liga": "リーグを作成", "Tipul competiției": "大会形式",
+    },
+    "ar": {
+        "Limba": "اللغة", "Profilul meu": "ملفي الشخصي", "Jucătorul meu": "لاعبي", "Deconectare": "تسجيل الخروج",
+        "Schimbă liga": "تغيير الدوري", "Navigare": "التنقل", "Autentificare": "تسجيل الدخول", "Cont nou": "حساب جديد",
+        "Nume de utilizator sau e-mail": "اسم المستخدم أو البريد الإلكتروني", "Parolă": "كلمة المرور", "Intră în cont": "دخول",
+        "Statisticile mele": "إحصائياتي", "Meciuri jucate": "المباريات التي لعبتها", "Urmează": "المباريات القادمة", "Live": "مباشر",
+        "Trofee": "الكؤوس", "Echipele mele": "فرقي", "Goluri": "أهداف", "Assisturi": "تمريرات حاسمة",
+        "Cartonașe galbene": "بطاقات صفراء", "Cartonașe roșii": "بطاقات حمراء", "Omul meciului": "أفضل لاعب في المباراة",
+        "Pe fiecare ligă": "حسب الدوري", "Trofee câștigate": "الكؤوس التي فزت بها", "Ligă": "الدوري", "Echipă": "الفريق",
+        "Jucător": "اللاعب", "Etapa": "الجولة", "Competiție": "المسابقة", "Data": "التاريخ", "Meci": "المباراة",
+        "Intră în ligă": "انضم إلى دوري", "Creează o ligă": "أنشئ دوريًا", "Clasament": "الترتيب", "Statistici": "الإحصائيات",
+        "Echipe și jucători": "الفرق واللاعبون", "Meciuri și program": "المباريات والجدول", "Arbitraj": "التحكيم", "Cupa": "الكأس",
+        "Supercupa": "كأس السوبر", "Premii sezon": "جوائز الموسم", "Transferuri": "الانتقالات", "Membri": "الأعضاء",
+        "Import / export": "استيراد / تصدير", "Setări ligă": "إعدادات الدوري", "Bine ai venit în Managerul Ligii de Fotbal": "مرحبًا بك في مدير دوري كرة القدم",
+        "Numele ligii": "اسم الدوري", "Creează liga": "إنشاء الدوري", "Tipul competiției": "نوع المسابقة",
+    },
+    "ur": {
+        "Limba": "زبان", "Profilul meu": "میری پروفائل", "Jucătorul meu": "میرا کھلاڑی", "Deconectare": "لاگ آؤٹ",
+        "Schimbă liga": "لیگ تبدیل کریں", "Navigare": "نیویگیشن", "Autentificare": "لاگ اِن", "Cont nou": "نیا اکاؤنٹ",
+        "Nume de utilizator sau e-mail": "صارف نام یا ای میل", "Parolă": "پاس ورڈ", "Intră în cont": "لاگ اِن کریں",
+        "Statisticile mele": "میرے اعدادوشمار", "Meciuri jucate": "کھیلے گئے میچ", "Urmează": "آنے والے", "Live": "براہِ راست",
+        "Trofee": "ٹرافیاں", "Echipele mele": "میری ٹیمیں", "Goluri": "گول", "Assisturi": "اسسٹ",
+        "Cartonașe galbene": "پیلا کارڈ", "Cartonașe roșii": "لال کارڈ", "Omul meciului": "میچ کا بہترین کھلاڑی",
+        "Pe fiecare ligă": "ہر لیگ کے مطابق", "Trofee câștigate": "جیتی ہوئی ٹرافیاں", "Ligă": "لیگ", "Echipă": "ٹیم",
+        "Jucător": "کھلاڑی", "Etapa": "راؤنڈ", "Competiție": "مقابلہ", "Data": "تاریخ", "Meci": "میچ",
+        "Intră în ligă": "لیگ میں شامل ہوں", "Creează o ligă": "لیگ بنائیں", "Clasament": "درجہ بندی", "Statistici": "اعدادوشمار",
+        "Echipe și jucători": "ٹیمیں اور کھلاڑی", "Meciuri și program": "میچ اور شیڈول", "Arbitraj": "ریفری", "Cupa": "کپ",
+        "Supercupa": "سپر کپ", "Premii sezon": "سیزن ایوارڈز", "Transferuri": "ٹرانسفر", "Membri": "ممبران",
+        "Import / export": "درآمد / برآمد", "Setări ligă": "لیگ کی ترتیبات", "Bine ai venit în Managerul Ligii de Fotbal": "فٹبال لیگ مینیجر میں خوش آمدید",
+        "Numele ligii": "لیگ کا نام", "Creează liga": "لیگ بنائیں", "Tipul competiției": "مقابلے کی قسم",
+    },
+    "pcm": {
+        "Limba": "Language", "Profilul meu": "My profile", "Jucătorul meu": "My player", "Deconectare": "Log out",
+        "Schimbă liga": "Change league", "Navigare": "Navigation", "Autentificare": "Sign in", "Cont nou": "New account",
+        "Nume de utilizator sau e-mail": "Username or email", "Parolă": "Password", "Intră în cont": "Sign in",
+        "Statisticile mele": "My statistics", "Meciuri jucate": "Matches wey I play", "Urmează": "Next matches", "Live": "Live",
+        "Trofee": "Trophies", "Echipele mele": "My teams", "Goluri": "Goals", "Assisturi": "Assists",
+        "Cartonașe galbene": "Yellow cards", "Cartonașe roșii": "Red cards", "Omul meciului": "Best player for match",
+        "Pe fiecare ligă": "For each league", "Trofee câștigate": "Trophies wey I win", "Ligă": "League", "Echipă": "Team",
+        "Jucător": "Player", "Etapa": "Round", "Competiție": "Competition", "Data": "Date", "Meci": "Match",
+        "Intră în ligă": "Join league", "Creează o ligă": "Create league", "Clasament": "Table", "Statistici": "Statistics",
+        "Echipe și jucători": "Teams and players", "Meciuri și program": "Matches and fixtures", "Arbitraj": "Referee", "Cupa": "Cup",
+        "Supercupa": "Super Cup", "Premii sezon": "Season awards", "Transferuri": "Transfers", "Membri": "Members",
+        "Import / export": "Import / export", "Setări ligă": "League settings", "Bine ai venit în Managerul Ligii de Fotbal": "You are welcome to Football League Manager",
+        "Numele ligii": "League name", "Creează liga": "Create league", "Tipul competiției": "Competition type",
+    },
+    "arz": {
+        "Limba": "اللغة", "Profilul meu": "ملفي الشخصي", "Jucătorul meu": "اللعيب بتاعي", "Deconectare": "تسجيل الخروج",
+        "Schimbă liga": "غيّر الدوري", "Navigare": "التنقل", "Autentificare": "تسجيل الدخول", "Cont nou": "حساب جديد",
+        "Nume de utilizator sau e-mail": "اسم المستخدم أو الإيميل", "Parolă": "كلمة السر", "Intră în cont": "ادخل للحساب",
+        "Statisticile mele": "إحصائياتي", "Meciuri jucate": "الماتشات اللي لعبتها", "Urmează": "الماتشات الجاية", "Live": "مباشر",
+        "Trofee": "بطولات", "Echipele mele": "فرقي", "Goluri": "أهداف", "Assisturi": "أسيستات",
+        "Cartonașe galbene": "كروت صفرا", "Cartonașe roșii": "كروت حمرا", "Omul meciului": "أحسن لاعب في الماتش",
+        "Pe fiecare ligă": "لكل دوري", "Trofee câștigate": "البطولات اللي كسبتها", "Ligă": "دوري", "Echipă": "فريق",
+        "Jucător": "لاعب", "Etapa": "جولة", "Competiție": "بطولة", "Data": "التاريخ", "Meci": "ماتش",
+        "Intră în ligă": "ادخل دوري", "Creează o ligă": "اعمل دوري", "Clasament": "الترتيب", "Statistici": "الإحصائيات",
+        "Echipe și jucători": "الفرق واللاعبين", "Meciuri și program": "الماتشات والجدول", "Arbitraj": "تحكيم", "Cupa": "كأس",
+        "Supercupa": "كأس السوبر", "Premii sezon": "جوائز الموسم", "Transferuri": "انتقالات", "Membri": "الأعضاء",
+        "Import / export": "استيراد / تصدير", "Setări ligă": "إعدادات الدوري", "Bine ai venit în Managerul Ligii de Fotbal": "أهلاً بيك في مدير دوري الكورة",
+        "Numele ligii": "اسم الدوري", "Creează liga": "اعمل الدوري", "Tipul competiției": "نوع البطولة",
+    },
+})
+for _language, _title in {
+    "zh": "足球联赛管理器", "hi": "फुटबॉल लीग मैनेजर", "fr": "Gestionnaire de ligue de football",
+    "bn": "ফুটবল লিগ ম্যানেজার", "pt": "Gerenciador de Ligas de Futebol",
+    "id": "Manajer Liga Sepak Bola", "ru": "Менеджер футбольной лиги", "de": "Fußball-Liga-Manager",
+    "ja": "サッカーリーグ管理", "ar": "مدير دوري كرة القدم", "ur": "فٹبال لیگ مینیجر",
+    "pcm": "Football League Manager", "arz": "مدير دوري الكورة",
+}.items():
+    UI_TRANSLATIONS[_language]["Managerul ligii de fotbal"] = _title
+
+
+def tr(text):
+    language = st.session_state.get("ui_language", "ro")
+    return UI_TRANSLATIONS.get(language, {}).get(str(text), text)
+
+
+def language_label(language_code):
+    return next((label for label, code in LANGUAGE_OPTIONS.items() if code == language_code), "Română")
+
+
+def render_language_selector(username=None, key="language_selector"):
+    current = st.session_state.get("ui_language", "ro")
+    selected = st.selectbox(tr("Limba"), list(LANGUAGE_OPTIONS),
+        index=list(LANGUAGE_OPTIONS.values()).index(current) if current in LANGUAGE_OPTIONS.values() else 0,
+        key=key)
+    selected_code = LANGUAGE_OPTIONS[selected]
+    if selected_code != current:
+        st.session_state["ui_language"] = selected_code
+        if username:
+            users = load_users()
+            account = users.get(username.casefold())
+            if account is not None:
+                account["limba"] = selected_code
+                save_users(users)
+        st.rerun()
+    if selected_code in {"ar", "arz", "ur"}:
+        st.markdown("<style>[data-testid='stAppViewContainer'],[data-testid='stSidebar']{direction:rtl;text-align:right} [data-testid='stMarkdownContainer'],[data-testid='stWidgetLabel']{text-align:right}</style>", unsafe_allow_html=True)
+
 BASE_DIR = Path(os.environ.get("LIGA_DATA_DIR", Path(__file__).resolve().parent / "ligi"))
 APP_DIR = Path(__file__).resolve().parent
 USERS_FILE = Path(os.environ.get("LIGA_USERS_FILE", APP_DIR / "utilizatori.json"))
@@ -269,6 +598,7 @@ def restore_remembered_account(cookie_manager):
         expiry = record.get("remember_tokens", {}).get(token_hash)
         if expiry and float(expiry) > dt.datetime.now().timestamp():
             st.session_state["user_key"] = username
+            st.session_state["ui_language"] = record.get("limba", "ro")
             st.session_state["remembered_username"] = username
             st.session_state["remembered_token_hash"] = token_hash
             return
@@ -291,6 +621,7 @@ def finish_pending_remember_login(cookie_manager):
             token_hash, str(pending.get("token_hash", ""))):
         return False
     st.session_state["user_key"] = username
+    st.session_state["ui_language"] = load_users().get(username, {}).get("limba", "ro")
     st.session_state["remembered_username"] = username
     st.session_state["remembered_token_hash"] = token_hash
     st.session_state.pop("pending_remember_login", None)
@@ -342,7 +673,7 @@ def create_account(username, email, password, name, birthday, plays_professional
     users[normalized_username] = {"nume": name.strip(), "email": normalized_email,
         "data_nasterii": birthday.strftime("%d.%m.%Y"),
         "joaca_fotbal": plays_professional, "pozitie": position, "sare": salt, "hash": digest,
-        "iteratii": PASSWORD_ITERATIONS, "dispozitive": [], "selectii_ligi": {},
+        "iteratii": PASSWORD_ITERATIONS, "dispozitive": [], "selectii_ligi": {}, "limba": "ro",
         "creat": dt.date.today().strftime("%d.%m.%Y")}
     save_users(users)
     return normalized_username
@@ -2134,11 +2465,11 @@ def render_cards(rows):
         st.caption("Nu există date de afișat încă.")
         return
     columns = list(dict.fromkeys(key for row in rows for key in row))
-    head = "".join(f"<th>{html.escape(str(column))}</th>" for column in columns)
+    head = "".join(f"<th>{html.escape(str(tr(column)))}</th>" for column in columns)
     body_rows = []
     for row in rows:
         cells = "".join(
-            f"<td>{html.escape(str(row.get(column) if row.get(column) not in (None, '') else '–'))}</td>"
+            f"<td>{html.escape(str(tr(row.get(column)) if row.get(column) not in (None, '') else '–'))}</td>"
             for column in columns)
         body_rows.append(f"<tr>{cells}</tr>")
     markup = ("<div class='league-table-wrap'><table class='league-table'>"
@@ -2715,11 +3046,12 @@ def render_player_dashboard(username, profile, paths):
             "current_player": final_player, "stats": stats,
             "motm": motm_wins_for_player(league_data, final_team, final_player)})
 
-    st.subheader("Jucătorul meu")
+    st.subheader(tr("Jucătorul meu"))
     if not player_leagues:
         st.info("Asociază-ți un jucător în cel puțin o ligă din secțiunea de mai sus. Aici apar doar ligile în care ai ales un jucător.")
     else:
-        player_tabs = st.tabs(["Statisticile mele", "Meciuri jucate", "Urmează", "Live", "Trofee", "Echipele mele"])
+        player_tabs = st.tabs([tr("Statisticile mele"), tr("Meciuri jucate"), tr("Urmează"),
+                               tr("Live"), tr("Trofee"), tr("Echipele mele")])
         totals = {key: 0 for key in STATS_JUCATOR}
         totals["omul_meciului"] = 0
         stats_rows, played_rows, upcoming_rows, live_rows, trophy_rows, team_rows = [], [], [], [], [], []
@@ -2819,10 +3151,10 @@ def render_player_dashboard(username, profile, paths):
         with player_tabs[0]:
             metric_cols = st.columns(5)
             for col, label, field in zip(metric_cols,
-                ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii", "Omul meciului"),
+                (tr("Goluri"), tr("Assisturi"), tr("Cartonașe galbene"), tr("Cartonașe roșii"), tr("Omul meciului")),
                 ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
                 col.metric(label, totals[field])
-            st.markdown("#### Pe fiecare ligă")
+            st.markdown(f"#### {tr('Pe fiecare ligă')}")
             render_cards(stats_rows)
         with player_tabs[1]:
             render_cards(played_rows)
@@ -2832,7 +3164,7 @@ def render_player_dashboard(username, profile, paths):
             render_cards(live_rows)
         with player_tabs[4]:
             if trophy_rows:
-                st.metric("Trofee câștigate", len(trophy_rows))
+                st.metric(tr("Trofee câștigate"), len(trophy_rows))
                 render_cards(trophy_rows)
             else:
                 st.info("Nu ai trofee câștigate în ligile asociate încă.")
@@ -2844,11 +3176,11 @@ def render_player_dashboard(username, profile, paths):
 
 def render_account_profile(username, profile, paths, player_only=False):
     if player_only:
-        st.title("Jucătorul meu")
+        st.title(tr("Jucătorul meu"))
         render_player_dashboard(username, profile, paths)
         return
-    st.title("Profilul meu")
-    st.caption("Profilul rămâne disponibil indiferent de liga deschisă.")
+    st.title(tr("Profilul meu"))
+    st.caption(tr("Profilul rămâne disponibil indiferent de liga deschisă."))
     render_league_management(username, paths)
 
     today = dt.date.today()
@@ -2858,19 +3190,19 @@ def render_account_profile(username, profile, paths, player_only=False):
         birthday_value = dt.datetime.strptime(profile.get("data_nasterii", ""), "%d.%m.%Y").date()
     except (ValueError, TypeError):
         pass
-    with st.expander("Datele contului", expanded=False):
+    with st.expander(tr("Datele contului"), expanded=False):
         with st.form("global_profile_details"):
-            display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
-            account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
+            display_name = st.text_input(tr("Nume și prenume"), value=profile.get("nume", username))
+            account_email = st.text_input(tr("Adresă de e-mail"), value=profile.get("email", ""),
                                           help="Te poți conecta și cu această adresă după salvare.")
             birthday = st.date_input("Data nașterii", value=min(birthday_value, today),
                                      min_value=dt.date(1900, 1, 1), max_value=today)
-            professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
+            professional = st.selectbox(tr("Joci la un club profesionist?"), ["Da", "Nu"], format_func=tr,
                 index=0 if profile.get("joaca_fotbal") == "Da" else 1)
             positions = list(POZITII_FOTBAL)
-            position = st.selectbox("Poziția ta", positions,
+            position = st.selectbox(tr("Poziția ta"), positions, format_func=tr,
                 index=positions.index(profile["pozitie"]) if profile.get("pozitie") in positions else 0)
-            save_profile = st.form_submit_button("Salvează profilul")
+            save_profile = st.form_submit_button(tr("Salvează profilul"))
         if save_profile:
             users = load_users()
             normalized_email = account_email.strip().casefold()
@@ -2889,7 +3221,7 @@ def render_account_profile(username, profile, paths, player_only=False):
                 st.success("Profilul a fost salvat.")
                 st.rerun()
 
-    with st.expander("Schimbă parola", expanded=False):
+    with st.expander(tr("Schimbă parola"), expanded=False):
         with st.form("global_change_account_password"):
             old_password = st.text_input("Parola curentă", type="password")
             new_password = st.text_input("Parola nouă", type="password")
@@ -2911,7 +3243,7 @@ def render_account_profile(username, profile, paths, player_only=False):
                 st.success("Parola a fost schimbată.")
                 st.rerun()
 
-    st.subheader("Asocierea cu jucătorii din ligile tale")
+    st.subheader(tr("Asocierea cu jucătorii din ligile tale"))
     if paths:
         league_labels = [f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · @{item['owner']}"
                          for item in paths]
@@ -2955,8 +3287,10 @@ def render_account_profile(username, profile, paths, player_only=False):
         st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
 
 def auth_view(cookie_manager):
-    st.markdown("## Intră în cont sau creează un profil")
-    st.caption("Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului.")
+    st.session_state.setdefault("ui_language", "ro")
+    render_language_selector(key="auth_language_selector")
+    st.markdown(f"## {tr('Intră în cont sau creează un profil')}")
+    st.caption(tr("Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului."))
     if not SUPABASE_ENABLED:
         st.warning("Baza de date online nu este conectată. Conturile create aici se pot pierde când aplicația repornește. Verifică Secrets în setările Streamlit Cloud.")
     pending = st.session_state.get("pending_remember_login")
@@ -2965,13 +3299,13 @@ def auth_view(cookie_manager):
         if st.button("Reîncearcă salvarea conectării", type="primary"):
             remember_account(cookie_manager, pending["username"])
         return
-    login_tab, signup_tab = st.tabs(["Autentificare", "Cont nou"])
+    login_tab, signup_tab = st.tabs([tr("Autentificare"), tr("Cont nou")])
     with login_tab:
         with st.form("login_account"):
-            username = st.text_input("Nume de utilizator sau e-mail")
-            password = st.text_input("Parolă", type="password")
-            remember = st.checkbox("Rămâi conectat pe acest dispozitiv (30 de zile)", value=True)
-            login = st.form_submit_button("Intră în cont", type="primary")
+            username = st.text_input(tr("Nume de utilizator sau e-mail"))
+            password = st.text_input(tr("Parolă"), type="password")
+            remember = st.checkbox(tr("Rămâi conectat pe acest dispozitiv (30 de zile)"), value=True)
+            login = st.form_submit_button(tr("Intră în cont"), type="primary")
         if login:
             attempts = st.session_state.setdefault("login_attempts", [])
             now = dt.datetime.now().timestamp()
@@ -2996,6 +3330,7 @@ def auth_view(cookie_manager):
                     st.stop()
                 if record and verify_password(record, password):
                     st.session_state.pop("login_attempts", None)
+                    st.session_state["ui_language"] = record.get("limba", "ro")
                     if remember:
                         remember_account(cookie_manager, key)
                         st.success("Conectarea se salvează pe acest dispozitiv…")
@@ -3010,9 +3345,9 @@ def auth_view(cookie_manager):
                 st.error("E-mailul/numele de utilizator sau parola nu corespund. Dacă acest cont a fost creat înainte să adaugi e-mailul, conectează-te cu numele de utilizator.")
     with signup_tab:
         with st.form("signup_account"):
-            username = st.text_input("Nume de utilizator", key="new_username")
-            email = st.text_input("Adresă de e-mail", key="new_email")
-            name = st.text_input("Nume și prenume")
+            username = st.text_input(tr("Nume de utilizator"), key="new_username")
+            email = st.text_input(tr("Adresă de e-mail"), key="new_email")
+            name = st.text_input(tr("Nume și prenume"))
             today = dt.date.today()
             birthday = st.date_input("Data nașterii", value=today.replace(year=today.year - 12),
                                      min_value=dt.date(1900, 1, 1), max_value=today)
@@ -3020,7 +3355,7 @@ def auth_view(cookie_manager):
             position = st.selectbox("Poziția ta", list(POZITII_FOTBAL))
             password = st.text_input("Parolă (minimum 6 caractere)", type="password", key="new_password")
             confirm = st.text_input("Confirmă parola", type="password")
-            remember_new = st.checkbox("Rămâi conectat pe acest dispozitiv (30 de zile)", value=True,
+            remember_new = st.checkbox(tr("Rămâi conectat pe acest dispozitiv (30 de zile)"), value=True,
                                        key="remember_new_account")
             signup = st.form_submit_button("Creează cont", type="primary")
         if signup:
@@ -3030,6 +3365,10 @@ def auth_view(cookie_manager):
                 try:
                     account_key = create_account(
                         username, email, password, name, birthday, plays, position)
+                    users = load_users()
+                    users[account_key]["limba"] = st.session_state.get("ui_language", "ro")
+                    save_users(users)
+                    st.session_state["ui_language"] = users[account_key]["limba"]
                     if remember_new:
                         remember_account(cookie_manager, account_key)
                         st.success("Contul a fost creat. Se salvează conectarea pe acest dispozitiv…")
@@ -3253,7 +3592,7 @@ def main():
       </a>
     </div>
     ''', unsafe_allow_html=True)
-    st.title("⚽ Managerul ligii de fotbal")
+    st.title(f"⚽ {tr('Managerul ligii de fotbal')}")
     st.markdown('<div class="league-subtitle">Clasamente, meciuri și cupe într-un singur loc</div>', unsafe_allow_html=True)
     access_code = str(st.query_params.get("cod", "")).strip()
     invite_token = str(st.query_params.get("invitat", "")).strip()
@@ -3334,6 +3673,7 @@ def main():
         profile = users[username]
         profile.setdefault("selectii_ligi", {})
         paths = get_user_leagues(username)
+        st.session_state.setdefault("ui_language", profile.get("limba", "ro"))
     st.session_state.setdefault("login_attempts", [])
     st.session_state["active_league_role"] = "owner"
     with st.sidebar:
@@ -3353,24 +3693,25 @@ def main():
         else:
             st.markdown(f"### 👤 {profile.get('nume') or username}")
             st.caption(f"@{username}")
-            if st.button("👤 Profilul meu", width="stretch", key="open_global_profile"):
+            render_language_selector(username, key="sidebar_language_selector")
+            if st.button(f"👤 {tr('Profilul meu')}", width="stretch", key="open_global_profile"):
                 st.session_state["show_account_profile"] = True
                 st.session_state.pop("show_player_profile", None)
                 st.rerun()
-            if st.button("⚽ Jucătorul meu", width="stretch", key="open_player_profile"):
+            if st.button(f"⚽ {tr('Jucătorul meu')}", width="stretch", key="open_player_profile"):
                 st.session_state["show_account_profile"] = True
                 st.session_state["show_player_profile"] = True
                 st.rerun()
         st.divider()
     if st.session_state.get("show_account_profile") and not is_guest:
-        if st.button("↩ Înapoi la aplicație"):
+        if st.button(f"↩ {tr('Înapoi la aplicație')}"):
             st.session_state.pop("show_account_profile", None)
             st.session_state.pop("show_player_profile", None)
             st.rerun()
         render_account_profile(username, profile, paths,
                                player_only=bool(st.session_state.get("show_player_profile")))
         st.divider()
-        if st.button("Deconectare", type="secondary", key="logout_from_profile"):
+        if st.button(tr("Deconectare"), type="secondary", key="logout_from_profile"):
             revoke_remembered_account(cookie_manager)
             st.session_state.pop("user_key", None)
             st.session_state.pop("active_league_role", None)
@@ -3388,23 +3729,23 @@ def main():
         st.session_state.pop("entered_league", None)
         entered_key = None
     if entered_key is None:
-        st.markdown("## Bine ai venit în Managerul Ligii de Fotbal")
-        st.caption("Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată.")
+        st.markdown(f"## {tr('Bine ai venit în Managerul Ligii de Fotbal')}")
+        st.caption(tr("Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată."))
         if not SUPABASE_ENABLED:
             st.warning("Supabase nu este conectat: ligile se salvează doar local și se pot pierde când aplicația repornește. Verifică SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY în Secrets.")
-        with st.expander("⚙️ Administrează ligile mele", expanded=False):
+        with st.expander(f"⚙️ {tr('Administrează ligile mele')}", expanded=False):
             render_league_management(username, paths)
         enter_col, create_col = st.columns(2, gap="large")
         with create_col:
             with st.container(border=True):
-                st.markdown("### ➕ Creează o ligă")
+                st.markdown(f"### ➕ {tr('Creează o ligă')}")
                 with st.form("launcher_create_league"):
-                    new_name = st.text_input("Numele ligii", "Liga mea")
+                    new_name = st.text_input(tr("Numele ligii"), "Liga mea")
                     source_entry = st.selectbox("Pornește de la", [None, *paths],
-                        format_func=lambda item: "Ligă goală" if item is None else
+                        format_func=lambda item: tr("Ligă goală") if item is None else
                             f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · @{item['owner']}")
-                    league_type = st.selectbox("Tipul competiției", ["Ligă", "Ligă + cupă", "Cupă"])
-                    create = st.form_submit_button("Creează liga", type="primary", width="stretch")
+                    league_type = st.selectbox(tr("Tipul competiției"), ["Ligă", "Ligă + cupă", "Cupă"], format_func=tr)
+                    create = st.form_submit_button(tr("Creează liga"), type="primary", width="stretch")
                 if create:
                     try:
                         created_path = create_user_league(username, new_name, source_entry, league_type)
@@ -3421,13 +3762,13 @@ def main():
                         st.caption(f"Detaliu: {exc}")
         with enter_col:
             with st.container(border=True):
-                st.markdown("### 📂 Intră într-o ligă")
+                st.markdown(f"### 📂 {tr('Intră în ligă')}")
                 if paths:
-                    selected_launcher = st.selectbox("Alege liga", list(by_label), key="launcher_league")
+                    selected_launcher = st.selectbox(tr("Alege liga"), list(by_label), key="launcher_league")
                     selected_launcher_entry = by_label[selected_launcher]
                     st.caption(f"Proprietar: @{selected_launcher_entry['owner']} · Acces: "
                                f"{'propriu' if selected_launcher_entry['role'] == 'owner' else selected_launcher_entry['role']}")
-                    if st.button("Intră în ligă", type="primary", width="stretch"):
+                    if st.button(tr("Intră în ligă"), type="primary", width="stretch"):
                         st.session_state["entered_league"] = league_key(selected_launcher_entry)
                         st.session_state.pop("active_league_picker", None)
                         st.rerun()
@@ -3485,7 +3826,7 @@ def main():
         if not is_guest:
             with st.sidebar:
                 st.divider()
-                if st.button("↩ Schimbă liga", width="stretch", key="change_league_viewer"):
+            if st.button(f"↩ {tr('Schimbă liga')}", width="stretch", key="change_league_viewer"):
                     st.session_state.pop("entered_league", None)
                     st.session_state.pop("active_league_picker", None)
                     st.rerun()
@@ -3512,12 +3853,12 @@ def main():
     }
     if st.session_state.get("main_navigation") not in pages:
         st.session_state["main_navigation"] = pages[0]
-    page = st.sidebar.radio("Navigare", pages,
-        format_func=lambda item: navigation_labels[item], key="main_navigation")
+    page = st.sidebar.radio(tr("Navigare"), pages,
+        format_func=lambda item: navigation_labels[item].replace(item, tr(item)), key="main_navigation")
     if not is_guest:
         with st.sidebar:
             st.divider()
-            if st.button("↩ Schimbă liga", width="stretch", key="change_league_member"):
+            if st.button(f"↩ {tr('Schimbă liga')}", width="stretch", key="change_league_member"):
                 st.session_state.pop("entered_league", None)
                 st.session_state.pop("active_league_picker", None)
                 st.rerun()
