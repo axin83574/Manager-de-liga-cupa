@@ -1617,6 +1617,30 @@ def _fixture_for_id(data, fixture_id):
                  if str(item.get("id")) == str(fixture_id)), None)
 
 
+def save_referee_state(path, fixture_id, access_code, live, finish=False):
+    """Persist the state of only the match whose referee code was supplied."""
+    code = str(access_code or "").strip().upper()
+    if len(code) != 8:
+        raise ValueError("Codul de arbitraj nu este valid.")
+    fresh = load_league(path)
+    fixture = _fixture_for_id(fresh, fixture_id)
+    saved_code = str(fixture.get("arbitraj_cod", "")) if fixture else ""
+    if not fixture or not saved_code or not hmac.compare_digest(saved_code, code):
+        raise ValueError("Codul nu mai este valabil pentru acest meci.")
+    updated_live = copy.deepcopy(live)
+    finish = finish or updated_live.get("faza") == "final"
+    if finish:
+        if not fixture.get("meci_id"):
+            match = build_match(fixture.get("e1", "Gazde"), fixture.get("e2", "Oaspeți"),
+                                updated_live.get("evenimente", []), fixture.get("etapa"))
+            apply_match(fresh, match)
+            fixture["meci_id"] = match["id"]
+        updated_live["faza"] = "final"
+        updated_live["pornit_la"] = None
+    fixture["arbitraj_live"] = updated_live
+    _store_league(path, fresh)
+
+
 def _live_match_score(data, fixture, live):
     if fixture.get("meci_id") and live.get("faza") == "final":
         recorded = next((item for item in data.get("istoric_meciuri", [])
@@ -1712,14 +1736,8 @@ def _live_set_running(live, running):
         live["pornit_la"] = None
 
 
-def _save_referee_event(data, fixture, live, event):
-    live.setdefault("evenimente", []).append(event)
-    fixture["arbitraj_live"] = live
-    save_league(st.session_state["_referee_path"], data)
-
-
 @st.fragment(run_every=2)
-def render_live_arbitration(path, fixture_id, can_edit):
+def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     data = load_league(path)
     fixture = _fixture_for_id(data, fixture_id)
     if not fixture:
@@ -1735,6 +1753,8 @@ def render_live_arbitration(path, fixture_id, can_edit):
     live.setdefault("secunde", 0)
     live.setdefault("faza", "programat")
     live.setdefault("pornit_la", None)
+    if can_edit and not referee_code:
+        referee_code = str(fixture.get("arbitraj_cod", ""))
     home, away = fixture.get("e1", "Gazde"), fixture.get("e2", "Oaspeți")
     shown_minute, minute_number, effective_stage, elapsed = _live_clock(live)
     goals_home, goals_away = _live_match_score(data, fixture, live)
@@ -1770,16 +1790,16 @@ def render_live_arbitration(path, fixture_id, can_edit):
                 live["secunde"] = 0
                 live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
                 fixture["arbitraj_live"] = live
-                save_league(path, data)
+                save_referee_state(path, fixture_id, referee_code, live)
                 st.rerun()
         elif phase == "repriza1" and effective_stage == "repriza1":
             if live.get("pornit_la"):
                 if st.button("⏸ Pune cronometrul pe pauză", key=f"ref_pause_{key}"):
                     _live_set_running(live, False); fixture["arbitraj_live"] = live
-                    save_league(path, data); st.rerun()
+                    save_referee_state(path, fixture_id, referee_code, live); st.rerun()
             elif st.button("▶ Continuă cronometrul", key=f"ref_resume_{key}"):
                 _live_set_running(live, True); fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif effective_stage == "repriza1_expirata":
             with st.form(f"ref_added1_{key}"):
                 added = st.number_input("Minute de prelungire pentru prima repriză", min_value=0,
@@ -1791,41 +1811,41 @@ def render_live_arbitration(path, fixture_id, can_edit):
                 live["secunde"] = 0
                 live["faza"] = "pauza" if not added else "prelungiri1"
                 live["pornit_la"] = (dt.datetime.now(dt.timezone.utc).isoformat() if added else None)
-                fixture["arbitraj_live"] = live; save_league(path, data); st.rerun()
+                fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "prelungiri1" and effective_stage == "prelungiri1":
             actions = st.columns(2)
             if live.get("pornit_la"):
                 if actions[0].button("⏸ Pauză", key=f"ref_extra1_pause_{key}"):
                     _live_set_running(live, False); fixture["arbitraj_live"] = live
-                    save_league(path, data); st.rerun()
+                    save_referee_state(path, fixture_id, referee_code, live); st.rerun()
             elif actions[0].button("▶ Continuă prelungirile", key=f"ref_extra1_resume_{key}"):
                 _live_set_running(live, True); fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
             if actions[1].button("Intră la pauză", key=f"ref_halftime_{key}"):
                 _live_set_running(live, False); live["faza"] = "pauza"
                 live["minute_extra_total"] = int(live.get("minute_extra_total", 0)) + int(live.get("minute_extra", 0))
                 live["minute_extra"] = 0
-                fixture["arbitraj_live"] = live; save_league(path, data); st.rerun()
+                fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "prelungiri1" and effective_stage == "prelungiri1_expirate":
             if st.button("Intră la pauză", type="primary", key=f"ref_halftime_done_{key}"):
                 live["faza"] = "pauza"; live["pornit_la"] = None
                 live["secunde"] = 0
                 live["minute_extra_total"] = int(live.get("minute_extra_total", 0)) + int(live.get("minute_extra", 0))
                 live["minute_extra"] = 0; fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "pauza":
             if st.button("▶ Pornește repriza a doua", type="primary", key=f"ref_second_start_{key}"):
                 live["faza"] = "repriza2"; live["secunde"] = 0
                 live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
-                fixture["arbitraj_live"] = live; save_league(path, data); st.rerun()
+                fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "repriza2" and effective_stage == "repriza2":
             if live.get("pornit_la"):
                 if st.button("⏸ Pune cronometrul pe pauză", key=f"ref_pause2_{key}"):
                     _live_set_running(live, False); fixture["arbitraj_live"] = live
-                    save_league(path, data); st.rerun()
+                    save_referee_state(path, fixture_id, referee_code, live); st.rerun()
             elif st.button("▶ Continuă cronometrul", key=f"ref_resume2_{key}"):
                 _live_set_running(live, True); fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif effective_stage == "repriza2_expirata":
             with st.form(f"ref_added2_{key}"):
                 added = st.number_input("Minute de prelungire pentru repriza a doua", min_value=0,
@@ -1836,32 +1856,28 @@ def render_live_arbitration(path, fixture_id, can_edit):
                 live["secunde"] = 0
                 live["faza"] = "final_așteptare" if not added else "prelungiri2"
                 live["pornit_la"] = (dt.datetime.now(dt.timezone.utc).isoformat() if added else None)
-                fixture["arbitraj_live"] = live; save_league(path, data); st.rerun()
+                fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "prelungiri2" and effective_stage == "prelungiri2":
             actions = st.columns(2)
             if live.get("pornit_la"):
                 if actions[0].button("⏸ Pauză", key=f"ref_extra2_pause_{key}"):
                     _live_set_running(live, False); fixture["arbitraj_live"] = live
-                    save_league(path, data); st.rerun()
+                    save_referee_state(path, fixture_id, referee_code, live); st.rerun()
             elif actions[0].button("▶ Continuă prelungirile", key=f"ref_extra2_resume_{key}"):
                 _live_set_running(live, True); fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase in {"final_așteptare", "prelungiri2"} and effective_stage in {"final_așteptare", "prelungiri2_expirate"}:
             if st.button("🏁 Fluier final și salvează rezultatul", type="primary", key=f"ref_finish_{key}"):
-                if not fixture.get("meci_id"):
-                    match = build_match(home, away, live.get("evenimente", []), fixture.get("etapa"))
-                    apply_match(data, match)
-                    fixture["meci_id"] = match["id"]
                 live["faza"] = "final"; live["pornit_la"] = None
                 fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         if phase in {"repriza1", "prelungiri1", "repriza2", "prelungiri2"} and effective_stage in {
                 "repriza1", "prelungiri1", "repriza2", "prelungiri2"}:
             if phase == "prelungiri1" and st.button("Marchează pauza", key=f"ref_halftime_manual_{key}"):
                 _live_set_running(live, False); live["faza"] = "pauza"
                 live["minute_extra_total"] = int(live.get("minute_extra_total", 0)) + int(live.get("minute_extra", 0))
                 live["minute_extra"] = 0; fixture["arbitraj_live"] = live
-                save_league(path, data); st.rerun()
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         can_record = phase in {"repriza1", "prelungiri1", "repriza2", "prelungiri2"} and effective_stage not in {
             "repriza1_expirata", "prelungiri1_expirate", "repriza2_expirata", "prelungiri2_expirate"}
         if can_record:
@@ -1917,7 +1933,7 @@ def render_live_arbitration(path, fixture_id, can_edit):
                         event["intra"] = incoming
                     live.setdefault("evenimente", []).append(event)
                     fixture["arbitraj_live"] = live
-                    save_league(path, data)
+                    save_referee_state(path, fixture_id, referee_code, live)
                     st.rerun()
     if live.get("evenimente"):
         st.markdown("#### Evenimente live")
@@ -1935,8 +1951,8 @@ def render_live_arbitration(path, fixture_id, can_edit):
 
 def render_viewer_arbitration(path, league_key_value):
     data = load_league(path)
-    st.subheader("Arbitraj live")
-    st.caption("Introdu codul primit de la proprietarul sau editorul ligii pentru a urmări meciul.")
+    st.subheader("Arbitraj")
+    st.caption("Introdu codul primit de la proprietarul sau editorul ligii ca să poți arbitra acel meci.")
     with st.form(f"viewer_referee_code_{safe_slug(league_key_value)}"):
         code = re.sub(r"[^A-Z0-9]", "", st.text_input("Codul meciului", max_chars=8).upper())
         enter = st.form_submit_button("Deschide meciul", type="primary")
@@ -1948,18 +1964,22 @@ def render_viewer_arbitration(path, league_key_value):
             st.error("Codul nu este valid pentru această ligă.")
             st.session_state.pop("arbitraj_fixture_id", None)
             st.session_state.pop("arbitraj_league_key", None)
+            st.session_state.pop("arbitraj_access_code", None)
         else:
             st.session_state["arbitraj_fixture_id"] = str(match.get("id"))
             st.session_state["arbitraj_league_key"] = league_key_value
+            st.session_state["arbitraj_access_code"] = code
             st.rerun()
     fixture_id = st.session_state.get("arbitraj_fixture_id")
     if fixture_id and st.session_state.get("arbitraj_league_key") == league_key_value:
         fixture = _fixture_for_id(data, fixture_id)
         if fixture:
-            render_live_arbitration(path, fixture_id, False)
-            if st.button("Închide urmărirea", key=f"ref_close_{safe_slug(league_key_value)}"):
+            render_live_arbitration(path, fixture_id, True,
+                                    st.session_state.get("arbitraj_access_code"))
+            if st.button("Închide arbitrajul", key=f"ref_close_{safe_slug(league_key_value)}"):
                 st.session_state.pop("arbitraj_fixture_id", None)
                 st.session_state.pop("arbitraj_league_key", None)
+                st.session_state.pop("arbitraj_access_code", None)
                 st.rerun()
 
 
@@ -1984,7 +2004,7 @@ def render_owner_arbitration(data, path, league_key_value):
             changed = True
     if changed:
         save_league(path, data)
-    st.caption("Codurile sunt vizibile doar proprietarului și editorilor. Trimite codul meciului spectatorilor.")
+    st.caption("Codurile sunt vizibile doar proprietarului și editorilor. Trimite codul doar arbitrului ales pentru meci.")
     render_cards([{"Etapa": item.get("etapa") or "—", "Meci": f"{item.get('e1')} – {item.get('e2')}",
                    "Cod arbitraj": item["arbitraj_cod"],
                    "Stare": item.get("arbitraj_live", {}).get("faza", "programat")}
@@ -1993,6 +2013,35 @@ def render_owner_arbitration(data, path, league_key_value):
         format_func=lambda item: f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')}",
         key=f"referee_fixture_{safe_slug(league_key_value)}")
     render_live_arbitration(path, str(selected.get("id")), True)
+
+
+@st.fragment(run_every=3)
+def render_live_matches_overview(path):
+    data = load_league(path)
+    live_fixtures = [fixture for fixture in data.get("program", [])
+        if fixture.get("arbitraj_live", {}).get("faza", "programat") not in {"programat", "final"}]
+    if not live_fixtures:
+        st.info("Nu există meciuri live în acest moment.")
+        return
+    st.caption("Scorul, cronometrul și evenimentele se actualizează automat.")
+    for fixture in ordered_by_stage(live_fixtures):
+        live = fixture.get("arbitraj_live", {})
+        goals_home, goals_away = _live_match_score(data, fixture, live)
+        shown, _, effective, _ = _live_clock(live)
+        phase_names = {"repriza1": "Prima repriză", "repriza1_expirata": "Prelungiri — repriza 1",
+            "prelungiri1": "Prelungiri — repriza 1", "prelungiri1_expirate": "Pauză",
+            "pauza": "Pauză", "repriza2": "A doua repriză",
+            "repriza2_expirata": "Prelungiri — repriza 2", "prelungiri2": "Prelungiri — repriza 2",
+            "prelungiri2_expirate": "Fluier final în așteptare", "final_așteptare": "Fluier final în așteptare"}
+        with st.container(border=True):
+            st.markdown(f"### 🔴 {fixture.get('e1')}  **{goals_home} – {goals_away}**  {fixture.get('e2')}")
+            st.caption(f"Etapa {fixture.get('etapa') or '—'} · {phase_names.get(effective, phase_names.get(live.get('faza'), 'În desfășurare'))} · {shown}")
+            for event in reversed(live.get("evenimente", [])[-5:]):
+                minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
+                description = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
+                if event.get("tip") == "Schimbare":
+                    description += f" → {event.get('intra', '—')}"
+                st.write(description)
 
 
 def render_cards(rows):
@@ -2227,9 +2276,9 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     can_choose_player = username or (guest_profile and guest_profile.get("kind") == "jucator") or (
         guest_invite and guest_invite.get("access_method") == "legacy"
         and guest_invite["invitation"].get("tip") == "jucator")
-    tabs = st.tabs(["Clasament", "Statistici", "Loturi", "Istoric meciuri", "Program", "Cupe", "Premii", "Arbitraj"] +
+    tabs = st.tabs(["Clasament", "Statistici", "Loturi", "Istoric meciuri", "Program", "Live", "Cupe", "Premii", "Arbitraj"] +
                    (["Alegerea mea"] if can_choose_player else []))
-    t1, t2, t3, t4, t5 = tabs[0], tabs[2], tabs[3], tabs[4], tabs[5]
+    t1, t2, t3, t4, t5 = tabs[0], tabs[2], tabs[3], tabs[4], tabs[6]
     with t1:
         st.subheader(data.get("nume_liga", "Liga"))
         render_cards(ranking(data))
@@ -2265,6 +2314,9 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 "Data": f.get("data", ""), "Status": "Programat"} for f in fixtures])
         else:
             st.info("Nu există meciuri rămase în program.")
+    with tabs[5]:
+        st.subheader("Meciuri live")
+        render_live_matches_overview(entry["path"])
     with t5:
         for cup in data.get("cupe", []):
             st.markdown(f"### {'🏅 ' if cup.get('super') else ''}{cup.get('nume', 'Cupa')} · {cup.get('status', '')}")
@@ -2332,10 +2384,10 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                         render_award_ballot(data, award, entry["path"], username, guest_invite,
                             widget_key=f"viewer-{league_key(entry)}-{award['cheie']}",
                             touch_friendly=True)
-    with tabs[7]:
+    with tabs[8]:
         render_viewer_arbitration(entry["path"], league_key(entry))
     if can_choose_player:
-        with tabs[8]:
+        with tabs[9]:
             teams = list(data.get("echipe", {}))
             if username:
                 st.write(f"{profile.get('nume', username)} · @{username} · {profile.get('pozitie', 'Poziție nespecificată')}")
@@ -3489,6 +3541,9 @@ def main():
                         st.error(str(exc))
 
     if page == "Meciuri și program":
+        st.markdown("### 🔴 Meciuri live")
+        render_live_matches_overview(path)
+        st.divider()
         st.subheader("Înregistrează un meci")
         teams = list(data["echipe"])
         if len(teams) < 2:
