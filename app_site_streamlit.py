@@ -2801,69 +2801,150 @@ def render_account_profile(username, profile, paths):
     else:
         st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
 
-    totals = dict(STATS_JUCATOR)
-    totals["omul_meciului"] = 0
-    league_rows = []
-    trophy_rows = []
+    player_leagues = []
     for league_entry in paths:
         league_data = load_league(league_entry["path"])
-        league_name = league_data.get("nume_liga", league_entry["path"].stem)
         selection = (profile.get("selectii_ligi", {}).get(league_key(league_entry)) or
-                     league_data.get("selectii_membri", {}).get(username))
-        member = next((item for item in league_data.get("membri", [])
-                       if str(item.get("username", "")).casefold() == username.casefold()
-                       and item.get("activ", True)), None)
-        if league_entry["role"] == "owner":
-            participation = "Proprietar"
-        elif selection and selection.get("jucator"):
-            participation = "Jucător"
-        elif member and member.get("tip") == "jucator":
-            participation = "Jucător"
-        else:
-            participation = "Spectator"
-        team_name = selection.get("echipa") if selection else None
-        player_name = selection.get("jucator") if selection else None
-        stats = (league_data.get("echipe", {}).get(team_name, {}).get("jucatori", {}).get(player_name, {})
-                 if team_name and player_name else {})
-        if stats:
-            for stat in totals:
-                if stat != "omul_meciului":
-                    totals[stat] += int(stats.get(stat, 0) or 0)
-            motm_count = motm_wins_for_player(league_data, team_name, player_name)
-            totals["omul_meciului"] += motm_count
-            player_trophies = trofee_jucator(league_data, team_name, player_name)
-            team_trophies = trofee_echipa(league_data, team_name)
+                     league_data.get("selectii_membri", {}).get(username, {}))
+        team_name, player_name = selection.get("echipa"), selection.get("jucator")
+        if not team_name or not player_name:
+            continue
+        if team_name not in league_data.get("echipe", {}):
+            continue
+        final_team, final_player = final_player_identity(league_data, team_name, player_name)
+        stats = (league_data.get("echipe", {}).get(final_team, {}).get("jucatori", {}).get(final_player)
+                 or league_data.get("echipe", {}).get(team_name, {}).get("jucatori", {}).get(player_name, {}))
+        if not stats:
+            continue
+        league_name = league_data.get("nume_liga", Path(league_entry["path"]).stem)
+        player_leagues.append({"entry": league_entry, "data": league_data, "league": league_name,
+            "team": team_name, "player": player_name, "current_team": final_team,
+            "current_player": final_player, "stats": stats,
+            "motm": motm_wins_for_player(league_data, final_team, final_player)})
+
+    st.subheader("Jucătorul meu")
+    if not player_leagues:
+        st.info("Asociază-ți un jucător în cel puțin o ligă din secțiunea de mai sus. Aici apar doar ligile în care ai ales un jucător.")
+    else:
+        player_tabs = st.tabs(["Statisticile mele", "Meciuri jucate", "Urmează", "Live", "Trofee", "Echipele mele"])
+        totals = {key: 0 for key in STATS_JUCATOR}
+        totals["omul_meciului"] = 0
+        stats_rows, played_rows, upcoming_rows, live_rows, trophy_rows, team_rows = [], [], [], [], [], []
+        for item in player_leagues:
+            league_data, team_name, player_name = item["data"], item["team"], item["player"]
+            league_name = item["league"]
+            for field in STATS_JUCATOR:
+                totals[field] += int(item["stats"].get(field, 0) or 0)
+            totals["omul_meciului"] += item["motm"]
+            player_trophies = trofee_jucator(league_data, item["current_team"], item["current_player"])
+            team_trophies = trofee_echipa(league_data, item["current_team"])
+            stats_rows.append({"Ligă": league_name, "Echipă": item["current_team"],
+                "Jucător": item["current_player"], "Goluri": item["stats"].get("goluri", 0),
+                "Assisturi": item["stats"].get("asisturi", 0),
+                "Galbene": item["stats"].get("cartonase_galbene", 0),
+                "Roșii": item["stats"].get("cartonase_rosii", 0), "Omul meciului": item["motm"]})
             for trophy in player_trophies:
                 trophy_rows.append({"Trofeu": trophy, "Ligă": league_name,
-                                    "Echipă": team_name, "Câștigat ca": player_name})
+                    "Echipă": item["current_team"], "Câștigat ca": item["current_player"]})
             for trophy in team_trophies:
                 trophy_rows.append({"Trofeu": trophy, "Ligă": league_name,
-                                    "Echipă": team_name, "Câștigat ca": "Membru al echipei"})
-        else:
-            player_trophies, team_trophies, motm_count = [], [], 0
-        league_rows.append({"Ligă": league_name, "Proprietar": f"@{league_entry['owner']}",
-            "Rol": participation, "Echipă": team_name or "–", "Jucător": player_name or "–",
-            "Goluri": stats.get("goluri", 0), "Assisturi": stats.get("asisturi", 0),
-            "Galbene": stats.get("cartonase_galbene", 0), "Roșii": stats.get("cartonase_rosii", 0),
-            "Omul meciului": motm_count,
-            "Trofee": " · ".join([*player_trophies, *team_trophies]) or "–"})
+                    "Echipă": item["current_team"], "Câștigat ca": "Membru al echipei"})
 
-    st.subheader("Statisticile mele · toate ligile")
-    metric_cols = st.columns(5)
-    for col, label, field in zip(metric_cols, ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii", "Omul meciului"),
-                                 ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
-        col.metric(label, totals[field])
-    st.markdown("#### Participarea și statisticile pe fiecare ligă")
-    if league_rows:
-        render_cards(league_rows)
-    else:
-        st.info("Nu ai fost încă în nicio ligă.")
-    st.markdown("#### Trofeele mele")
-    if trophy_rows:
-        render_cards(trophy_rows)
-        st.metric("Trofee câștigate", len(trophy_rows))
-    else:
-        st.caption("Trofeele câștigate în ligile asociate profilului vor apărea aici.")
+            match_records = [(match, "Liga") for match in league_data.get("istoric_meciuri", [])]
+            for cup in league_data.get("cupe", []):
+                for round_data in cup.get("runde", []):
+                    for slot in round_data.get("meciuri", []):
+                        for match in (slot.get("meci"), slot.get("meci_retur")):
+                            if match:
+                                match_records.append((match, cup.get("nume", "Cupă")))
+            seen_matches = set()
+            player_teams = {team_name, item["current_team"]}
+            transfer_team, transfer_player = team_name, player_name
+            for transfer in league_data.get("transferuri", []):
+                if (transfer.get("de_la") == transfer_team and
+                        str(transfer.get("jucator", "")).casefold() == transfer_player.casefold()):
+                    player_teams.add(transfer.get("la"))
+                    transfer_team = transfer.get("la")
+                    transfer_player = transfer.get("nume_nou", transfer_player)
+            for match, competition in match_records:
+                if not player_teams.intersection((match.get("e1"), match.get("e2"))):
+                    continue
+                match_id = str(match.get("id") or id(match))
+                if match_id in seen_matches:
+                    continue
+                seen_matches.add(match_id)
+                played_rows.append({"Ligă": league_name, "Competiție": competition,
+                    "Etapa": match.get("etapa") or "—",
+                    "Meci": f"{match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}"})
+
+            for fixture in pending_fixtures(league_data):
+                if item["current_team"] not in (fixture.get("e1"), fixture.get("e2")):
+                    continue
+                phase = fixture.get("arbitraj_live", {}).get("faza", "programat")
+                row = {"Ligă": league_name, "Etapa": fixture.get("etapa") or "—",
+                       "Competiție": "Liga", "Data": fixture.get("data") or "Nesetată",
+                       "Meci": f"{fixture.get('e1')} – {fixture.get('e2')}"}
+                if phase not in {"programat", "final"}:
+                    live = fixture.get("arbitraj_live", {})
+                    score_home, score_away = _live_match_score(league_data, fixture, live)
+                    row["Scor live"] = f"{score_home}–{score_away}"
+                    row["Stare"] = live.get("faza", "În desfășurare")
+                    live_rows.append({"Ligă": league_name, **row})
+                else:
+                    upcoming_rows.append(row)
+
+            for cup in league_data.get("cupe", []):
+                if cup.get("castigatoare"):
+                    continue
+                for round_data in cup.get("runde", []):
+                    for slot in round_data.get("meciuri", []):
+                        if slot.get("castigator"):
+                            continue
+                        if item["current_team"] not in (slot.get("e1"), slot.get("e2")):
+                            continue
+                        if slot.get("meci") is None:
+                            pending_leg = "Tur" if cup.get("tur_retur") else ""
+                        elif cup.get("tur_retur") and slot.get("meci_retur") is None:
+                            pending_leg = "Retur"
+                        else:
+                            continue
+                        upcoming_rows.append({"Ligă": league_name,
+                            "Competiție": (cup.get("nume", "Cupă") + (f" · {pending_leg}" if pending_leg else "")),
+                            "Etapa": round_data.get("nume", "—"),
+                            "Data": "Nesetată", "Meci": f"{slot.get('e1')} – {slot.get('e2')}"})
+
+            team_rows.append({"Ligă": league_name, "Echipă aleasă": team_name,
+                              "Jucător ales": player_name, "Echipă actuală după transferuri": item["current_team"]})
+            current_team, current_player = team_name, player_name
+            for transfer in league_data.get("transferuri", []):
+                if (transfer.get("de_la") == current_team and
+                        str(transfer.get("jucator", "")).casefold() == current_player.casefold()):
+                    team_rows.append({"Ligă": league_name, "Echipă aleasă": transfer.get("de_la"),
+                        "Jucător ales": transfer.get("jucator"), "Echipă actuală după transferuri": transfer.get("la")})
+                    current_team, current_player = transfer.get("la"), transfer.get("nume_nou", current_player)
+
+        with player_tabs[0]:
+            metric_cols = st.columns(5)
+            for col, label, field in zip(metric_cols,
+                ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii", "Omul meciului"),
+                ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
+                col.metric(label, totals[field])
+            st.markdown("#### Pe fiecare ligă")
+            render_cards(stats_rows)
+        with player_tabs[1]:
+            render_cards(played_rows)
+        with player_tabs[2]:
+            render_cards(upcoming_rows)
+        with player_tabs[3]:
+            render_cards(live_rows)
+        with player_tabs[4]:
+            if trophy_rows:
+                st.metric("Trofee câștigate", len(trophy_rows))
+                render_cards(trophy_rows)
+            else:
+                st.info("Nu ai trofee câștigate în ligile asociate încă.")
+        with player_tabs[5]:
+            render_cards(team_rows)
 
 
 def auth_view(cookie_manager):
