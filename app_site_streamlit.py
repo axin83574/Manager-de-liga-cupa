@@ -1711,19 +1711,18 @@ def _live_clock(live):
         elapsed = half * 60
         effective = "repriza1_expirata" if stage == "repriza1" else "repriza2_expirata"
     elif stage in {"prelungiri1", "prelungiri2"} and elapsed >= added * 60:
-        elapsed = added * 60
         effective = "prelungiri1_expirate" if stage == "prelungiri1" else "prelungiri2_expirate"
     if stage == "repriza1":
         minute = min(half, elapsed // 60 + 1)
         shown = f"{minute}′"
         number = minute
     elif stage == "prelungiri1":
-        extra_elapsed = min(added, elapsed // 60 + 1)
+        extra_elapsed = elapsed // 60 + 1
         shown = f"{half}+{extra_elapsed}′"
         number = half + extra_elapsed
     elif stage in {"pauza", "repriza2", "prelungiri2", "repriza2_expirata", "prelungiri2_expirate"}:
         if stage in {"prelungiri2", "prelungiri2_expirate"}:
-            extra_elapsed = min(added, elapsed // 60 + 1)
+            extra_elapsed = elapsed // 60 + 1
             shown = f"{half * 2}+{extra_elapsed}′"
             number = half * 2 + extra_elapsed
         else:
@@ -1819,11 +1818,11 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
         "programat": "Meciul nu a început", "repriza1": "Prima repriză",
         "repriza1_expirata": "Timpul primei reprize s-a încheiat",
         "prelungiri1": "Prelungiri · prima repriză",
-        "prelungiri1_expirate": "Prelungirile primei reprize s-au încheiat",
+        "prelungiri1_expirate": "Timpul suplimentar setat s-a scurs",
         "pauza": "Pauză", "repriza2": "A doua repriză",
         "repriza2_expirata": "Timpul reprizei a doua s-a încheiat",
         "prelungiri2": "Prelungiri · repriza a doua",
-        "prelungiri2_expirate": "Prelungirile reprizei a doua s-au încheiat",
+        "prelungiri2_expirate": "Timpul suplimentar setat s-a scurs",
         "final_așteptare": "Așteaptă fluierul final",
         "final": "Meci încheiat",
     }
@@ -1865,8 +1864,8 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
             if set_added:
                 live["minute_extra"] = int(added)
                 live["secunde"] = 0
-                live["faza"] = "pauza" if not added else "prelungiri1"
-                live["pornit_la"] = (dt.datetime.now(dt.timezone.utc).isoformat() if added else None)
+                live["faza"] = "prelungiri1"
+                live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
                 fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "prelungiri1" and effective_stage == "prelungiri1":
             actions = st.columns(2)
@@ -1883,9 +1882,13 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                 live["minute_extra"] = 0
                 fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "prelungiri1" and effective_stage == "prelungiri1_expirate":
+            st.info("Timpul suplimentar s-a scurs. Cronometrul continuă să ruleze; înregistrează ce se mai întâmplă, apoi închide repriza.")
+            if not live.get("pornit_la") and st.button("▶ Continuă cronometrul", key=f"ref_extra1_continue_after_limit_{key}"):
+                _live_set_running(live, True); fixture["arbitraj_live"] = live
+                save_referee_state(path, fixture_id, referee_code, live); st.rerun()
             if st.button("Intră la pauză", type="primary", key=f"ref_halftime_done_{key}"):
-                live["faza"] = "pauza"; live["pornit_la"] = None
-                live["secunde"] = 0
+                _live_set_running(live, False)
+                live["faza"] = "pauza"
                 live["minute_extra_total"] = int(live.get("minute_extra_total", 0)) + int(live.get("minute_extra", 0))
                 live["minute_extra"] = 0; fixture["arbitraj_live"] = live
                 save_referee_state(path, fixture_id, referee_code, live); st.rerun()
@@ -1910,8 +1913,8 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
             if set_added:
                 live["minute_extra"] = int(added)
                 live["secunde"] = 0
-                live["faza"] = "final_așteptare" if not added else "prelungiri2"
-                live["pornit_la"] = (dt.datetime.now(dt.timezone.utc).isoformat() if added else None)
+                live["faza"] = "prelungiri2"
+                live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
                 fixture["arbitraj_live"] = live; save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase == "prelungiri2" and effective_stage == "prelungiri2":
             actions = st.columns(2)
@@ -1923,7 +1926,13 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                 _live_set_running(live, True); fixture["arbitraj_live"] = live
                 save_referee_state(path, fixture_id, referee_code, live); st.rerun()
         elif phase in {"final_așteptare", "prelungiri2"} and effective_stage in {"final_așteptare", "prelungiri2_expirate"}:
-            if st.button("🏁 Fluier final și salvează rezultatul", type="primary", key=f"ref_finish_{key}"):
+            if effective_stage == "prelungiri2_expirate":
+                st.info("Timpul suplimentar s-a scurs. Cronometrul continuă să ruleze; înregistrează ce se mai întâmplă, apoi închide meciul.")
+                if phase == "prelungiri2" and not live.get("pornit_la") and st.button(
+                        "▶ Continuă cronometrul", key=f"ref_extra2_continue_after_limit_{key}"):
+                    _live_set_running(live, True); fixture["arbitraj_live"] = live
+                    save_referee_state(path, fixture_id, referee_code, live); st.rerun()
+            if st.button("🏁 Închide meciul și salvează rezultatul", type="primary", key=f"ref_finish_{key}"):
                 live["faza"] = "final"; live["pornit_la"] = None
                 fixture["arbitraj_live"] = live
                 save_referee_state(path, fixture_id, referee_code, live); st.rerun()
@@ -1934,8 +1943,8 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                 live["minute_extra_total"] = int(live.get("minute_extra_total", 0)) + int(live.get("minute_extra", 0))
                 live["minute_extra"] = 0; fixture["arbitraj_live"] = live
                 save_referee_state(path, fixture_id, referee_code, live); st.rerun()
-        can_record = phase in {"repriza1", "prelungiri1", "repriza2", "prelungiri2"} and effective_stage not in {
-            "repriza1_expirata", "prelungiri1_expirate", "repriza2_expirata", "prelungiri2_expirate"}
+        can_record = phase in {"repriza1", "prelungiri1", "repriza2", "prelungiri2"} and (
+            effective_stage not in {"repriza1_expirata", "repriza2_expirata"})
         if can_record:
             st.markdown("#### Înregistrează un eveniment")
             event_team = st.selectbox("Echipa", [home, away], key=f"ref_team_{key}")
