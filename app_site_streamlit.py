@@ -2693,114 +2693,7 @@ def render_league_management(username, paths):
                     st.rerun()
 
 
-def render_account_profile(username, profile, paths):
-    st.title("Profilul meu")
-    st.caption("Profilul rămâne disponibil indiferent de liga deschisă.")
-    render_league_management(username, paths)
-
-    today = dt.date.today()
-    default_birthday = today.replace(year=today.year - 12)
-    birthday_value = default_birthday
-    try:
-        birthday_value = dt.datetime.strptime(profile.get("data_nasterii", ""), "%d.%m.%Y").date()
-    except (ValueError, TypeError):
-        pass
-    with st.expander("Datele contului", expanded=False):
-        with st.form("global_profile_details"):
-            display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
-            account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
-                                          help="Te poți conecta și cu această adresă după salvare.")
-            birthday = st.date_input("Data nașterii", value=min(birthday_value, today),
-                                     min_value=dt.date(1900, 1, 1), max_value=today)
-            professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
-                index=0 if profile.get("joaca_fotbal") == "Da" else 1)
-            positions = list(POZITII_FOTBAL)
-            position = st.selectbox("Poziția ta", positions,
-                index=positions.index(profile["pozitie"]) if profile.get("pozitie") in positions else 0)
-            save_profile = st.form_submit_button("Salvează profilul")
-        if save_profile:
-            users = load_users()
-            normalized_email = account_email.strip().casefold()
-            email_in_use = any(user_key != username and
-                str(user_record.get("email", "")).strip().casefold() == normalized_email
-                for user_key, user_record in users.items()) if normalized_email else False
-            if normalized_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
-                st.error("Introdu o adresă de e-mail validă.")
-            elif email_in_use:
-                st.error("Adresa aceasta este deja folosită de alt cont.")
-            else:
-                users[username].update({"nume": display_name.strip() or username,
-                    "email": normalized_email, "data_nasterii": birthday.strftime("%d.%m.%Y"),
-                    "joaca_fotbal": professional, "pozitie": position})
-                save_users(users)
-                st.success("Profilul a fost salvat.")
-                st.rerun()
-
-    with st.expander("Schimbă parola", expanded=False):
-        with st.form("global_change_account_password"):
-            old_password = st.text_input("Parola curentă", type="password")
-            new_password = st.text_input("Parola nouă", type="password")
-            new_password_confirm = st.text_input("Confirmă parola nouă", type="password")
-            change_password = st.form_submit_button("Schimbă parola")
-        if change_password:
-            if not verify_password(profile, old_password):
-                st.error("Parola curentă este greșită.")
-            elif len(new_password) < 6:
-                st.error("Parola nouă trebuie să aibă cel puțin 6 caractere.")
-            elif new_password != new_password_confirm:
-                st.error("Parolele noi nu coincid.")
-            else:
-                users = load_users()
-                salt, digest = password_hash(new_password)
-                users[username].update({"sare": salt, "hash": digest,
-                    "iteratii": PASSWORD_ITERATIONS, "dispozitive": []})
-                save_users(users)
-                st.success("Parola a fost schimbată.")
-                st.rerun()
-
-    st.subheader("Asocierea cu jucătorii din ligile tale")
-    if paths:
-        league_labels = [f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · @{item['owner']}"
-                         for item in paths]
-        selected_index = st.selectbox("Liga", range(len(paths)),
-            format_func=lambda index: league_labels[index], key="global_profile_league_index")
-        selected_entry = paths[selected_index]
-        selected_data = load_league(selected_entry["path"])
-        teams = list(selected_data.get("echipe", {}))
-        if teams:
-            selected_key = league_key(selected_entry)
-            previous = (profile.get("selectii_ligi", {}).get(selected_key) or
-                        selected_data.get("selectii_membri", {}).get(username, {}))
-            widget_id = f"{safe_slug(selected_entry['owner'])}_{safe_slug(selected_entry['path'].stem)}"
-            team = st.selectbox("Echipa", teams,
-                index=teams.index(previous["echipa"]) if previous.get("echipa") in teams else 0,
-                key=f"global_profile_team_{widget_id}")
-            players = list(selected_data["echipe"][team].get("jucatori", {}))
-            player = st.selectbox("Jucător", players,
-                index=players.index(previous["jucator"]) if previous.get("jucator") in players else 0,
-                key=f"global_profile_player_{widget_id}_{safe_slug(team)}") if players else None
-            if not players:
-                st.info("Echipa aleasă nu are încă jucători în lot.")
-            if st.button("Salvează asocierea", type="primary", disabled=not bool(players),
-                         key=f"global_profile_save_{widget_id}") and player:
-                try:
-                    if selected_entry["role"] == "owner":
-                        users = load_users()
-                        users[username].setdefault("selectii_ligi", {})[selected_key] = {
-                            "echipa": team, "jucator": player, "pozitie": profile.get("pozitie", ""),
-                            "actualizat": dt.datetime.now().timestamp()}
-                        save_users(users)
-                    else:
-                        save_code_member_choice(selected_entry, username, team, player)
-                    st.success("Asocierea a fost salvată.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Nu am putut salva asocierea: {exc}")
-        else:
-            st.info("Liga selectată nu are echipe încă.")
-    else:
-        st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
-
+def render_player_dashboard(username, profile, paths):
     player_leagues = []
     for league_entry in paths:
         league_data = load_league(league_entry["path"])
@@ -2946,6 +2839,122 @@ def render_account_profile(username, profile, paths):
         with player_tabs[5]:
             render_cards(team_rows)
 
+
+
+
+def render_account_profile(username, profile, paths, player_only=False):
+    if player_only:
+        st.title("Jucătorul meu")
+        render_player_dashboard(username, profile, paths)
+        return
+    st.title("Profilul meu")
+    st.caption("Profilul rămâne disponibil indiferent de liga deschisă.")
+    render_league_management(username, paths)
+
+    today = dt.date.today()
+    default_birthday = today.replace(year=today.year - 12)
+    birthday_value = default_birthday
+    try:
+        birthday_value = dt.datetime.strptime(profile.get("data_nasterii", ""), "%d.%m.%Y").date()
+    except (ValueError, TypeError):
+        pass
+    with st.expander("Datele contului", expanded=False):
+        with st.form("global_profile_details"):
+            display_name = st.text_input("Nume și prenume", value=profile.get("nume", username))
+            account_email = st.text_input("Adresă de e-mail", value=profile.get("email", ""),
+                                          help="Te poți conecta și cu această adresă după salvare.")
+            birthday = st.date_input("Data nașterii", value=min(birthday_value, today),
+                                     min_value=dt.date(1900, 1, 1), max_value=today)
+            professional = st.selectbox("Joci la un club profesionist?", ["Da", "Nu"],
+                index=0 if profile.get("joaca_fotbal") == "Da" else 1)
+            positions = list(POZITII_FOTBAL)
+            position = st.selectbox("Poziția ta", positions,
+                index=positions.index(profile["pozitie"]) if profile.get("pozitie") in positions else 0)
+            save_profile = st.form_submit_button("Salvează profilul")
+        if save_profile:
+            users = load_users()
+            normalized_email = account_email.strip().casefold()
+            email_in_use = any(user_key != username and
+                str(user_record.get("email", "")).strip().casefold() == normalized_email
+                for user_key, user_record in users.items()) if normalized_email else False
+            if normalized_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+                st.error("Introdu o adresă de e-mail validă.")
+            elif email_in_use:
+                st.error("Adresa aceasta este deja folosită de alt cont.")
+            else:
+                users[username].update({"nume": display_name.strip() or username,
+                    "email": normalized_email, "data_nasterii": birthday.strftime("%d.%m.%Y"),
+                    "joaca_fotbal": professional, "pozitie": position})
+                save_users(users)
+                st.success("Profilul a fost salvat.")
+                st.rerun()
+
+    with st.expander("Schimbă parola", expanded=False):
+        with st.form("global_change_account_password"):
+            old_password = st.text_input("Parola curentă", type="password")
+            new_password = st.text_input("Parola nouă", type="password")
+            new_password_confirm = st.text_input("Confirmă parola nouă", type="password")
+            change_password = st.form_submit_button("Schimbă parola")
+        if change_password:
+            if not verify_password(profile, old_password):
+                st.error("Parola curentă este greșită.")
+            elif len(new_password) < 6:
+                st.error("Parola nouă trebuie să aibă cel puțin 6 caractere.")
+            elif new_password != new_password_confirm:
+                st.error("Parolele noi nu coincid.")
+            else:
+                users = load_users()
+                salt, digest = password_hash(new_password)
+                users[username].update({"sare": salt, "hash": digest,
+                    "iteratii": PASSWORD_ITERATIONS, "dispozitive": []})
+                save_users(users)
+                st.success("Parola a fost schimbată.")
+                st.rerun()
+
+    st.subheader("Asocierea cu jucătorii din ligile tale")
+    if paths:
+        league_labels = [f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · @{item['owner']}"
+                         for item in paths]
+        selected_index = st.selectbox("Liga", range(len(paths)),
+            format_func=lambda index: league_labels[index], key="global_profile_league_index")
+        selected_entry = paths[selected_index]
+        selected_data = load_league(selected_entry["path"])
+        teams = list(selected_data.get("echipe", {}))
+        if teams:
+            selected_key = league_key(selected_entry)
+            previous = (profile.get("selectii_ligi", {}).get(selected_key) or
+                        selected_data.get("selectii_membri", {}).get(username, {}))
+            widget_id = f"{safe_slug(selected_entry['owner'])}_{safe_slug(selected_entry['path'].stem)}"
+            team = st.selectbox("Echipa", teams,
+                index=teams.index(previous["echipa"]) if previous.get("echipa") in teams else 0,
+                key=f"global_profile_team_{widget_id}")
+            players = list(selected_data["echipe"][team].get("jucatori", {}))
+            player = st.selectbox("Jucător", players,
+                index=players.index(previous["jucator"]) if previous.get("jucator") in players else 0,
+                key=f"global_profile_player_{widget_id}_{safe_slug(team)}") if players else None
+            if not players:
+                st.info("Echipa aleasă nu are încă jucători în lot.")
+            if st.button("Salvează asocierea", type="primary", disabled=not bool(players),
+                         key=f"global_profile_save_{widget_id}") and player:
+                try:
+                    if selected_entry["role"] == "owner":
+                        users = load_users()
+                        users[username].setdefault("selectii_ligi", {})[selected_key] = {
+                            "echipa": team, "jucator": player, "pozitie": profile.get("pozitie", ""),
+                            "actualizat": dt.datetime.now().timestamp()}
+                        save_users(users)
+                    else:
+                        save_code_member_choice(selected_entry, username, team, player)
+                    st.success("Asocierea a fost salvată.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Nu am putut salva asocierea: {exc}")
+        else:
+            st.info("Liga selectată nu are echipe încă.")
+    else:
+        st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
+
+    render_player_dashboard(username, profile, paths)
 
 def auth_view(cookie_manager):
     st.markdown("## Intră în cont sau creează un profil")
@@ -3348,13 +3357,20 @@ def main():
             st.caption(f"@{username}")
             if st.button("👤 Profilul meu", width="stretch", key="open_global_profile"):
                 st.session_state["show_account_profile"] = True
+                st.session_state.pop("show_player_profile", None)
+                st.rerun()
+            if st.button("⚽ Jucătorul meu", width="stretch", key="open_player_profile"):
+                st.session_state["show_account_profile"] = True
+                st.session_state["show_player_profile"] = True
                 st.rerun()
         st.divider()
     if st.session_state.get("show_account_profile") and not is_guest:
         if st.button("↩ Înapoi la aplicație"):
             st.session_state.pop("show_account_profile", None)
+            st.session_state.pop("show_player_profile", None)
             st.rerun()
-        render_account_profile(username, profile, paths)
+        render_account_profile(username, profile, paths,
+                               player_only=bool(st.session_state.get("show_player_profile")))
         st.divider()
         if st.button("Deconectare", type="secondary", key="logout_from_profile"):
             revoke_remembered_account(cookie_manager)
