@@ -596,6 +596,9 @@ def create_user_league(username, name, source_entry=None, league_type="Ligă"):
                 "status": "în desfășurare", "castigatoare": None}
             created_data["cupe"].append(cup)
         save_league(path, created_data)
+        saved_data = load_league(path)
+        if saved_data.get("nume_liga") != created_data["nume_liga"]:
+            raise ValueError("Liga nu a putut fi confirmată în Supabase după salvare. Verifică dacă acest cont există în app_users și dacă secretul SUPABASE_SERVICE_ROLE_KEY este corect.")
         return path
     user_folder = BASE_DIR / username
     user_folder.mkdir(parents=True, exist_ok=True)
@@ -621,7 +624,52 @@ def create_user_league(username, name, source_entry=None, league_type="Ligă"):
             "status": "în desfășurare", "castigatoare": None}
         created_data["cupe"].append(cup)
     save_league(path, created_data)
+    saved_data = load_league(path)
+    if saved_data.get("nume_liga") != created_data["nume_liga"]:
+        raise ValueError("Liga nu a putut fi confirmată după salvare.")
     return path
+
+
+def delete_user_league(username, entry):
+    """Delete one league only when the current account owns it."""
+    path = Path(entry["path"])
+    if entry.get("role") != "owner" or str(entry.get("owner", "")).casefold() != username.casefold():
+        raise ValueError("Poți șterge doar o ligă care îți aparține.")
+    key = league_key(entry)
+    if is_db_league_path(path):
+        table = supabase_client().table("app_leagues")
+        owned_row = (table.select("id").eq("id", db_league_id(path))
+                     .eq("owner_username", username).limit(1).execute().data or [])
+        if not owned_row:
+            raise ValueError("Liga nu a fost găsită în Supabase sau nu îți aparține.")
+        table.delete().eq("id", db_league_id(path)).eq("owner_username", username).execute()
+        remaining = (table.select("id").eq("id", db_league_id(path))
+                     .eq("owner_username", username).limit(1).execute().data or [])
+        if remaining:
+            raise ValueError("Supabase nu a confirmat ștergerea ligii.")
+    else:
+        data_root = BASE_DIR.resolve()
+        resolved_path = path.resolve()
+        if resolved_path.parent.parent != data_root or resolved_path.parent.name.casefold() != username.casefold():
+            raise ValueError("Locația ligii nu corespunde contului tău.")
+        if not resolved_path.is_file():
+            raise ValueError("Fișierul ligii nu mai există.")
+        resolved_path.unlink()
+        backup = resolved_path.with_suffix(resolved_path.suffix + ".bak")
+        if backup.is_file():
+            backup.unlink()
+    users = load_users()
+    record = users.get(username.casefold())
+    if record:
+        selections = record.get("selectii_ligi")
+        if not isinstance(selections, dict):
+            selections = record["selectii_ligi"] = {}
+        selections.pop(key, None)
+        try:
+            save_users(users)
+        except Exception:
+            pass
+    return key
 
 
 def load_league(path):
@@ -2423,9 +2471,63 @@ def render_guest_player_choice(data, path, invitation):
             st.metric("Goluri în această ligă", stats.get("goluri", 0))
 
 
+def render_league_management(username, paths):
+    owned = [entry for entry in paths if entry.get("role") == "owner"
+             and str(entry.get("owner", "")).casefold() == username.casefold()]
+    st.subheader("Administrare ligi")
+    st.caption("Aici poți deschide sau șterge ligile create de tine.")
+    if not owned:
+        st.info("Nu ai ligi create în acest cont.")
+        return
+    pending_key = "confirm_delete_league"
+    for entry in owned:
+        path = Path(entry["path"])
+        league_key_value = league_key(entry)
+        try:
+            league_data = load_league(path)
+            name = league_data.get("nume_liga", path.stem)
+            teams = len(league_data.get("echipe", {}))
+            matches = len(league_data.get("istoric_meciuri", []))
+        except Exception as exc:
+            name, teams, matches = path.stem, "?", "?"
+            st.warning(f"Nu am putut încărca detaliile pentru liga «{name}»: {exc}")
+        token = safe_slug(path.stem)
+        with st.container(border=True):
+            details, open_col, delete_col = st.columns([5, 1.3, 1.2])
+            details.markdown(f"### {name}")
+            details.caption(f"{teams} echipe · {matches} meciuri")
+            if open_col.button("Deschide", key=f"manage_open_{token}", width="stretch"):
+                st.session_state["entered_league"] = league_key_value
+                st.session_state.pop("show_account_profile", None)
+                st.rerun()
+            if delete_col.button("Șterge", key=f"manage_delete_{token}", width="stretch"):
+                st.session_state[pending_key] = league_key_value
+                st.rerun()
+            if st.session_state.get(pending_key) == league_key_value:
+                st.warning(f"Ștergi definitiv liga «{name}» și toate datele ei? Acțiunea nu poate fi anulată.")
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button("Da, șterge liga", type="primary", key=f"manage_confirm_{token}"):
+                    try:
+                        deleted_key = delete_user_league(username, entry)
+                        if st.session_state.get("entered_league") == deleted_key:
+                            st.session_state.pop("entered_league", None)
+                        if st.session_state.get("arbitraj_league_key") == deleted_key:
+                            st.session_state.pop("arbitraj_league_key", None)
+                            st.session_state.pop("arbitraj_fixture_id", None)
+                        st.session_state.pop(pending_key, None)
+                        st.success(f"Liga «{name}» a fost ștearsă.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Liga nu a putut fi ștearsă: {exc}")
+                if cancel_col.button("Anulează", key=f"manage_cancel_{token}"):
+                    st.session_state.pop(pending_key, None)
+                    st.rerun()
+
+
 def render_account_profile(username, profile, paths):
     st.title("Profilul meu")
     st.caption("Profilul rămâne disponibil indiferent de liga deschisă.")
+    render_league_management(username, paths)
 
     today = dt.date.today()
     default_birthday = today.replace(year=today.year - 12)
@@ -3024,6 +3126,8 @@ def main():
     if entered_key is None:
         st.markdown("## Bine ai venit în Managerul Ligii de Fotbal")
         st.caption("Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată.")
+        if not SUPABASE_ENABLED:
+            st.warning("Supabase nu este conectat: ligile se salvează doar local și se pot pierde când aplicația repornește. Verifică SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY în Secrets.")
         create_col, enter_col = st.columns(2, gap="large")
         with create_col:
             with st.container(border=True):
@@ -3036,12 +3140,19 @@ def main():
                     league_type = st.selectbox("Tipul competiției", ["Ligă", "Ligă + cupă", "Cupă"])
                     create = st.form_submit_button("Creează liga", type="primary", width="stretch")
                 if create:
-                    created_path = create_user_league(username, new_name, source_entry, league_type)
-                    created_entry = {"path": created_path, "role": "owner", "owner": username}
-                    st.session_state["entered_league"] = league_key(created_entry)
-                    st.session_state["active_league_role"] = "owner"
-                    st.session_state.pop("active_league_picker", None)
-                    st.rerun()
+                    try:
+                        created_path = create_user_league(username, new_name, source_entry, league_type)
+                        saved_entry = next((item for item in get_user_leagues(username)
+                            if item.get("role") == "owner" and item["path"] == created_path), None)
+                        if not saved_entry:
+                            raise ValueError("Liga a fost creată, dar nu apare încă în lista ligilor contului. Reîncarcă pagina și verifică dacă a fost salvată.")
+                        st.session_state["entered_league"] = league_key(saved_entry)
+                        st.session_state["active_league_role"] = "owner"
+                        st.session_state.pop("active_league_picker", None)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error("Liga nu a putut fi creată și confirmată în stocare.")
+                        st.caption(f"Detaliu: {exc}")
         with enter_col:
             with st.container(border=True):
                 st.markdown("### 📂 Intră într-o ligă")
