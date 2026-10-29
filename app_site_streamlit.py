@@ -2408,8 +2408,35 @@ def main():
     .league-kicker { color:var(--green); text-transform:uppercase; letter-spacing:.14em;
         font-size:.74rem; font-weight:800; margin-bottom:.2rem; }
     .league-subtitle { color:var(--muted); margin-top:-.35rem; margin-bottom:1.5rem; font-size:1.03rem; }
+    .bike-ad-wrap { margin:0 0 1.15rem; }
+    a.bike-ad-banner { display:flex; align-items:center; justify-content:space-between; gap:1rem;
+        padding:1rem 1.25rem; border-radius:16px; border:1px solid #3a5945;
+        background:linear-gradient(105deg,#17281f 0%,#203b2b 58%,#284b35 100%);
+        color:#f5fff7 !important; text-decoration:none !important; box-shadow:0 9px 25px rgba(0,0,0,.18);
+        transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+    a.bike-ad-banner:hover { transform:translateY(-2px); border-color:#71b984;
+        box-shadow:0 13px 30px rgba(0,0,0,.24); }
+    .bike-ad-left { display:flex; align-items:center; gap:1rem; min-width:0; }
+    .bike-ad-icon { display:grid; place-items:center; flex:0 0 3.25rem; height:3.25rem;
+        border-radius:13px; background:#d9f2df; color:#17442a !important; font-size:1.8rem; }
+    .bike-ad-copy { min-width:0; }
+    .bike-ad-eyebrow { display:block; color:#a8d8b4 !important; text-transform:uppercase;
+        letter-spacing:.12em; font-size:.67rem; font-weight:800; margin-bottom:.16rem; }
+    .bike-ad-title { display:block; color:#fff !important; font:800 1.15rem 'Manrope',sans-serif;
+        line-height:1.25; }
+    .bike-ad-subtitle { display:block; color:#d0e2d4 !important; font-size:.87rem; margin-top:.15rem; }
+    .bike-ad-cta { flex:0 0 auto; display:inline-flex; align-items:center; gap:.4rem;
+        border-radius:10px; background:#d9f2df; color:#17442a !important; font-weight:800;
+        padding:.72rem .95rem; white-space:nowrap; }
+    .bike-ad-cta::after { content:'↗'; font-size:1.05rem; }
     @media(max-width:700px) { [data-testid="stMainBlockContainer"] { padding:1.2rem 1rem 3rem; }
-        [data-testid="stMetric"] { padding:13px; } h1 { font-size:1.8rem !important; } }
+        [data-testid="stMetric"] { padding:13px; } h1 { font-size:1.8rem !important; }
+        a.bike-ad-banner { padding:.8rem; gap:.65rem; border-radius:13px; }
+        .bike-ad-left { gap:.65rem; }
+        .bike-ad-icon { flex-basis:2.7rem; height:2.7rem; font-size:1.5rem; }
+        .bike-ad-title { font-size:.96rem; }
+        .bike-ad-subtitle { font-size:.76rem; }
+        .bike-ad-cta { padding:.62rem .7rem; font-size:.78rem; } }
     </style>
     """, unsafe_allow_html=True)
     dark_mode = bool(st.session_state.get("dark_mode", False))
@@ -2461,6 +2488,21 @@ def main():
         button[data-testid="stBaseButton-primary"]:disabled *,button[data-testid="stBaseButton-primaryFormSubmit"]:disabled * { color:#9eaaa1 !important; }
         </style>
         """, unsafe_allow_html=True)
+    st.markdown('''
+    <div class="bike-ad-wrap">
+      <a class="bike-ad-banner" href="https://event.2performant.com/events/click?ad_type=quicklink&amp;aff_code=7067ba403&amp;unique=6e0b0b0df&amp;redirect_to=https%3A%2F%2Fpiese-biciclete.eu%2F" target="_blank" rel="sponsored noopener noreferrer" aria-label="Vizitează magazinul Piese-Biciclete.eu — link afiliat">
+        <span class="bike-ad-left">
+          <span class="bike-ad-icon" aria-hidden="true">🚲</span>
+          <span class="bike-ad-copy">
+            <span class="bike-ad-eyebrow">Partener · link afiliat</span>
+            <span class="bike-ad-title">Piese-Biciclete.eu</span>
+            <span class="bike-ad-subtitle">Biciclete, piese și accesorii pentru următoarea ta aventură</span>
+          </span>
+        </span>
+        <span class="bike-ad-cta">Descoperă magazinul</span>
+      </a>
+    </div>
+    ''', unsafe_allow_html=True)
     st.title("⚽ Managerul ligii de fotbal")
     st.markdown('<div class="league-subtitle">Clasamente, meciuri și cupe într-un singur loc</div>', unsafe_allow_html=True)
     access_code = str(st.query_params.get("cod", "")).strip()
