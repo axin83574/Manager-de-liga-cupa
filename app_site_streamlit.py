@@ -763,8 +763,16 @@ def save_league(path, data):
                 st.error("Invitația nu mai permite modificarea ligii.")
                 st.stop()
         # Editors can change league content but cannot grant themselves or others access.
+        requested_member_types = {
+            str(member.get("username", "")).casefold(): member.get("tip")
+            for member in data.get("membri", []) if member.get("username")
+        }
         data["membri"] = current.get("membri", [])
-        for key in ("invitatii", "selectii_membri", "coduri_invitat", "partajare", "partajare_adresa", "partajare_setari"):
+        for member in data["membri"]:
+            requested_type = requested_member_types.get(str(member.get("username", "")).casefold())
+            if requested_type in {"jucator", "spectator"}:
+                member["tip"] = requested_type
+        for key in ("invitatii", "coduri_invitat", "partajare", "partajare_adresa", "partajare_setari"):
             if key in current:
                 data[key] = current[key]
     _store_league(path, data)
@@ -2719,7 +2727,6 @@ def render_player_dashboard(username, profile, paths):
             "current_player": final_player, "stats": stats,
             "motm": motm_wins_for_player(league_data, final_team, final_player)})
 
-    st.subheader(tr("Jucătorul meu"))
     if not player_leagues:
         st.info("Asociază-ți un jucător în cel puțin o ligă din secțiunea de mai sus. Aici apar doar ligile în care ai ales un jucător.")
     else:
@@ -4547,6 +4554,83 @@ def main():
                             st.caption(f"Alegerea profilului: {linked.get('echipa')} · {linked.get('jucator')} ({linked.get('pozitie') or 'poziție nespecificată'})")
             else:
                 st.info("Nu ai partajat această ligă cu niciun cont încă.")
+
+        if role in {"owner", "editor"}:
+            st.divider()
+            st.markdown("#### Corectează jucătorul ales de un spectator")
+            st.caption("Poți schimba asocierea dacă un spectator a ales din greșeală jucătorul altcuiva.")
+            assignment_targets = []
+            for member in data.get("membri", []):
+                member_username = str(member.get("username", "")).strip()
+                if (member_username and member_username.casefold() != str(owner).casefold()
+                        and member.get("rol") != "editor"):
+                    assignment_targets.append({"id": member_username, "name": f"@{member_username}",
+                                              "type": "cont", "member": member})
+            for invitation in data.get("invitatii", []):
+                invitation_id = str(invitation.get("id", "")).strip()
+                if invitation_id and invitation.get("activ", True):
+                    assignment_targets.append({"id": invitation_id,
+                        "name": invitation.get("nume", "Invitat"), "type": "invitație",
+                        "invitation": invitation})
+
+            teams_for_assignment = list(data.get("echipe", {}))
+            if not assignment_targets:
+                st.info("Nu există spectatori sau invitați în această ligă încă.")
+            elif not teams_for_assignment:
+                st.info("Adaugă mai întâi echipe și jucători în ligă.")
+            else:
+                for target_index, target in enumerate(assignment_targets):
+                    target_id = target["id"]
+                    previous_selection = data.get("selectii_membri", {}).get(target_id, {})
+                    if target["type"] == "cont" and not previous_selection:
+                        linked = load_users().get(target_id.casefold(), {}).get("selectii_ligi", {}).get(
+                            league_key(selected_entry), {})
+                        previous_selection = linked
+                    previous_kind = "Jucător" if previous_selection.get("jucator") else "Spectator"
+                    with st.expander(f"{target['name']} · {previous_kind}", expanded=False):
+                        with st.form(f"member_player_assignment_{safe_slug(target_id)}"):
+                            choice_type = st.radio("Tipul profilului", ["Jucător", "Spectator"],
+                                index=0 if previous_kind == "Jucător" else 1,
+                                horizontal=True, key=f"member_choice_type_{safe_slug(target_id)}")
+                            team_index = (teams_for_assignment.index(previous_selection["echipa"])
+                                if previous_selection.get("echipa") in teams_for_assignment else 0)
+                            chosen_team = st.selectbox("Echipa", teams_for_assignment,
+                                index=team_index, key=f"member_choice_team_{safe_slug(target_id)}")
+                            player_options = list(data["echipe"][chosen_team].get("jucatori", {}))
+                            prior_player = previous_selection.get("jucator")
+                            player_index = player_options.index(prior_player) if prior_player in player_options else 0
+                            chosen_player = st.selectbox("Jucător", player_options,
+                                index=player_index, disabled=not player_options,
+                                key=f"member_choice_player_{safe_slug(target_id)}")
+                            save_assignment = st.form_submit_button("Salvează alegerea", type="primary")
+                        if save_assignment:
+                            selections = data.setdefault("selectii_membri", {})
+                            if choice_type == "Jucător" and chosen_player:
+                                selection = {"echipa": chosen_team, "jucator": chosen_player,
+                                    "tip": "jucator", "actualizat": dt.datetime.now().timestamp()}
+                                if target["type"] == "invitație":
+                                    selection["nume"] = target["name"]
+                                selections[target_id] = selection
+                                if target["type"] == "cont":
+                                    target["member"]["tip"] = "jucator"
+                            else:
+                                selections.pop(target_id, None)
+                                if target["type"] == "cont":
+                                    target["member"]["tip"] = "spectator"
+                            save_league(path, data)
+                            if target["type"] == "cont":
+                                users = load_users()
+                                account = users.get(target_id.casefold())
+                                if account is not None:
+                                    account_selections = account.setdefault("selectii_ligi", {})
+                                    if choice_type == "Jucător" and chosen_player:
+                                        account_selections[league_key(selected_entry)] = {
+                                            **selections[target_id], "pozitie": account.get("pozitie", "")}
+                                    else:
+                                        account_selections.pop(league_key(selected_entry), None)
+                                    save_users(users)
+                            st.success(f"Alegerea pentru {target['name']} a fost actualizată.")
+                            st.rerun()
 
     if page == "Profil":
         st.subheader("Profil personal")
