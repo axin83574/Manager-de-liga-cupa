@@ -2070,62 +2070,79 @@ def render_team_manager_panel(data, path, username, team_name):
         return
     st.markdown(f"### ⚽ {team_name}")
     league_slug = safe_slug(str(path))
-    with st.form(f"manager_add_player_{league_slug}"):
-        player_name = st.text_input("Numele jucătorului")
-        position = st.selectbox("Poziția", ["Nespecificată", *POZITII_FOTBAL])
-        add_player = st.form_submit_button("Adaugă jucător", type="primary")
-    if add_player:
-        try:
-            save_manager_player(path, username, player_name, position)
-            st.success("Jucătorul a fost adăugat în lot.")
-            st.rerun()
-        except ValueError as exc:
-            st.error(str(exc))
+    lineup_tab, players_tab = st.tabs(["Echipă de start", "Adaugă jucători"])
+    with players_tab:
+        with st.form(f"manager_add_player_{league_slug}"):
+            player_name = st.text_input("Numele jucătorului")
+            position = st.selectbox("Poziția", ["Nespecificată", *POZITII_FOTBAL])
+            add_player = st.form_submit_button("Adaugă jucător", type="primary")
+        if add_player:
+            try:
+                save_manager_player(path, username, player_name, position)
+                st.success("Jucătorul a fost adăugat în lot.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
-    st.divider()
-    st.markdown("#### Echipa de start")
-    fixtures = [fixture for fixture in pending_fixtures(data)
-                if team_name in (fixture.get("e1"), fixture.get("e2"))]
-    if not fixtures:
-        st.info("Nu există meciuri programate pentru echipa ta.")
-        return
-    configured_players = int(data.get("setari_liga", {}).get("jucatori_pe_teren", 11))
-    formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players, ("4-3-3",))
-    roster = list(data.get("echipe", {}).get(team_name, {}).get("jucatori", {}))
-    for index, fixture in enumerate(ordered_by_stage(fixtures)):
-        fixture_id = str(fixture.get("id", index))
-        fixture_slug = safe_slug(f"{path}_{fixture_id}")
-        live = fixture.get("arbitraj_live", {})
-        lineups = live.get("echipe_start", {})
-        with st.expander(f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"):
-            saved = lineups.get(team_name, {})
-            if live.get("faza", "programat") != "programat":
-                if saved:
-                    _render_formation_pitch(lineups, fixture.get("e1"), fixture.get("e2"))
-                else:
-                    st.info("Meciul a început; echipa de start nu a fost salvată.")
-                continue
-            formation = saved.get("formatie", formations[0])
-            formation = st.selectbox("Formație", formations,
-                index=formations.index(formation) if formation in formations else 0,
-                key=f"manager_formation_{fixture_slug}")
-            initial_positions = saved.get("pozitii") or dict(zip(
-                _formation_position_labels(formation), saved.get("jucatori", [])))
-            positions = _starting_lineup_inputs(team_name, roster, formation,
-                f"manager_lineup_{fixture_slug}", initial_positions)
-            preview = copy.deepcopy(lineups)
-            preview[team_name] = {"formatie": formation, "pozitii": positions}
-            _render_formation_pitch(preview, fixture.get("e1"), fixture.get("e2"))
-            if len(roster) < configured_players:
-                st.warning(f"Adaugă încă {configured_players - len(roster)} jucător(i) în lot pentru a completa echipa de start.")
-            if st.button("Salvează echipa de start", key=f"manager_save_lineup_{fixture_slug}",
-                         type="primary", disabled=len(roster) < configured_players):
-                try:
-                    save_manager_lineup(path, username, fixture_id, team_name, formation, positions)
-                    st.success("Echipa de start a fost salvată pentru acest meci.")
+    with lineup_tab:
+        fixtures = [fixture for fixture in pending_fixtures(data)
+                    if team_name in (fixture.get("e1"), fixture.get("e2"))]
+        if not fixtures:
+            st.info("Nu există meciuri programate pentru echipa ta.")
+        else:
+            ordered_fixtures = ordered_by_stage(fixtures)
+            selected_key = f"manager_fixture_{league_slug}_{safe_slug(team_name)}"
+            selected_id = st.session_state.get(selected_key)
+            selected_fixture = next((fixture for fixture in ordered_fixtures
+                if str(fixture.get("id")) == str(selected_id)), None)
+            if selected_fixture is None:
+                st.session_state.pop(selected_key, None)
+                st.caption("Apasă pe meciul pentru care vrei să alegi formația și titularii.")
+                for index, fixture in enumerate(ordered_fixtures):
+                    if st.button(f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}",
+                                 key=f"manager_open_fixture_{league_slug}_{index}", width="stretch"):
+                        st.session_state[selected_key] = str(fixture.get("id"))
+                        st.rerun()
+            else:
+                if st.button("← Înapoi la meciuri", key=f"manager_back_fixtures_{league_slug}"):
+                    st.session_state.pop(selected_key, None)
                     st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
+                fixture_id = str(selected_fixture.get("id"))
+                fixture_slug = safe_slug(f"{path}_{fixture_id}")
+                live = selected_fixture.get("arbitraj_live", {})
+                lineups = live.get("echipe_start", {})
+                saved = lineups.get(team_name, {})
+                st.markdown(f"#### Etapa {selected_fixture.get('etapa') or '—'} · {selected_fixture.get('e1')} – {selected_fixture.get('e2')}")
+                if live.get("faza", "programat") != "programat":
+                    if saved:
+                        _render_formation_pitch(lineups, selected_fixture.get("e1"), selected_fixture.get("e2"))
+                    else:
+                        st.info("Meciul a început; echipa de start nu a fost salvată.")
+                else:
+                    configured_players = int(data.get("setari_liga", {}).get("jucatori_pe_teren", 11))
+                    formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players, ("4-3-3",))
+                    roster = list(data.get("echipe", {}).get(team_name, {}).get("jucatori", {}))
+                    formation = saved.get("formatie", formations[0])
+                    formation = st.selectbox("Formație", formations,
+                        index=formations.index(formation) if formation in formations else 0,
+                        key=f"manager_formation_{fixture_slug}")
+                    initial_positions = saved.get("pozitii") or dict(zip(
+                        _formation_position_labels(formation), saved.get("jucatori", [])))
+                    positions = _starting_lineup_inputs(team_name, roster, formation,
+                        f"manager_lineup_{fixture_slug}", initial_positions)
+                    preview = copy.deepcopy(lineups)
+                    preview[team_name] = {"formatie": formation, "pozitii": positions}
+                    _render_formation_pitch(preview, selected_fixture.get("e1"), selected_fixture.get("e2"))
+                    if len(roster) < configured_players:
+                        st.warning(f"Adaugă încă {configured_players - len(roster)} jucător(i) în lot pentru a completa echipa de start.")
+                    if st.button("Salvează echipa de start", key=f"manager_save_lineup_{fixture_slug}",
+                                 type="primary", disabled=len(roster) < configured_players):
+                        try:
+                            save_manager_lineup(path, username, fixture_id, team_name, formation, positions)
+                            st.success("Echipa de start a fost salvată pentru acest meci.")
+                            st.rerun()
+                        except ValueError as exc:
+                            st.error(str(exc))
 
 
 @st.fragment(run_every=2)
@@ -2391,9 +2408,11 @@ def render_viewer_arbitration(path, league_key_value):
 
 def render_owner_arbitration(data, path, league_key_value):
     st.subheader("Arbitraj live")
-    fixtures = data.get("program", [])
+    fixtures = [fixture for fixture in data.get("program", [])
+        if not fixture.get("meci_id")
+        and fixture.get("arbitraj_live", {}).get("faza", "programat") != "final"]
     if not fixtures:
-        st.info("Adaugă mai întâi meciurile în Program, din «Meciuri și program».")
+        st.info("Nu există meciuri neîncheiate de arbitrat. Meciurile jucate apar în Rezultate.")
         return
     changed = False
     for fixture in fixtures:
