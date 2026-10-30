@@ -1942,8 +1942,9 @@ def _render_formation_pitch(lineups, home, away):
         return (f'<section class="pitch-half"><div class="pitch-team-label">{team} · '
                 f'{html.escape(formation)}</div>{"".join(rows)}</section>')
 
-    away_groups = ["Atacant", "Mijlocaș", "Fundaș", "Portar"]
-    home_groups = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
+    # Keep both goalkeepers toward the outside edges and the forwards toward midfield.
+    away_groups = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
+    home_groups = ["Atacant", "Mijlocaș", "Fundaș", "Portar"]
     away_half = render_team_half(away, "away-shirt", away_groups)
     home_half = render_team_half(home, "home-shirt", home_groups)
     st.markdown("""
@@ -1974,10 +1975,13 @@ def _render_formation_pitch(lineups, home, away):
     st.markdown(f'<div class="lineup-pitch">{away_half}{home_half}</div>', unsafe_allow_html=True)
 
 
-def _starting_lineup_inputs(team_name, roster, formation, widget_prefix):
+def _starting_lineup_inputs(team_name, roster, formation, widget_prefix, initial_positions=None):
     positions = {}
     for position in _formation_position_labels(formation):
-        selected = st.selectbox(position, [None, *roster], index=0,
+        options = [None, *roster]
+        initial_player = (initial_positions or {}).get(position)
+        selected = st.selectbox(position, options,
+            index=options.index(initial_player) if initial_player in options else 0,
             format_func=lambda name: "Alege jucător" if name is None else name,
             key=f"{widget_prefix}_{safe_slug(team_name)}_{safe_slug(formation)}_{safe_slug(position)}")
         positions[position] = selected
@@ -2029,76 +2033,22 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     st.caption(f"Minutul meciului: {shown_minute}")
     st.caption(f"Format: {live.get('jucatori_pe_teren', configured_players_on_field)} jucători/echipă · "
                f"{live.get('half_minutes', configured_half_minutes)} minute/repriză")
-    starting_lineups = live.get("echipe_start", {})
-    if starting_lineups:
-        st.markdown("#### Echipe de start")
-        _render_formation_pitch(starting_lineups, home, away)
     if can_edit:
         key = safe_slug(str(fixture_id))
         phase = live.get("faza", "programat")
         if phase == "programat":
             st.info(f"Fiecare repriză durează {configured_half_minutes} minute. "
                     f"Fiecare echipă are {configured_players_on_field} jucători pe teren.")
-            home_roster = list(data.get("echipe", {}).get(home, {}).get("jucatori", {}))
-            away_roster = list(data.get("echipe", {}).get(away, {}).get("jucatori", {}))
-            formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players_on_field, ("4-3-3",))
-            can_fill_lineup = (len(home_roster) >= configured_players_on_field
-                               and len(away_roster) >= configured_players_on_field)
-            st.markdown("#### Formație și echipa de start")
-            lineup_home, lineup_away = st.columns(2)
-            with lineup_home:
-                st.markdown(f"**{home}**")
-                home_formation = st.selectbox("Formație", formations,
-                    key=f"ref_formation_home_{key}")
-                home_positions = _starting_lineup_inputs(home, home_roster, home_formation,
-                    f"ref_start_home_{key}")
-            with lineup_away:
-                st.markdown(f"**{away}**")
-                away_formation = st.selectbox("Formație", formations,
-                    key=f"ref_formation_away_{key}")
-                away_positions = _starting_lineup_inputs(away, away_roster, away_formation,
-                    f"ref_start_away_{key}")
-            preview_lineups = {
-                home: {"formatie": home_formation, "pozitii": home_positions},
-                away: {"formatie": away_formation, "pozitii": away_positions},
-            }
-            st.markdown("#### Așezarea pe teren")
-            _render_formation_pitch(preview_lineups, home, away)
-            skip_lineup = False
-            if not can_fill_lineup:
-                st.warning("Unul dintre loturi nu are destui jucători pentru numărul setat pe teren.")
-                skip_lineup = st.checkbox("Pornește fără să înregistrezi echipele de start",
-                    key=f"ref_skip_lineup_{key}")
             start_match = st.button("Pornește prima repriză", type="primary", key=f"referee_setup_{key}")
             if start_match:
-                home_players = list(home_positions.values())
-                away_players = list(away_positions.values())
-                lineup_is_complete = (
-                    len(home_players) == configured_players_on_field
-                    and len(away_players) == configured_players_on_field
-                    and all(home_players) and all(away_players)
-                    and len(set(home_players)) == len(home_players)
-                    and len(set(away_players)) == len(away_players))
-                if not skip_lineup and not lineup_is_complete:
-                    st.error(f"Alege un jucător diferit pentru fiecare poziție: {configured_players_on_field} titulari pentru fiecare echipă.")
-                else:
-                    if skip_lineup:
-                        live.pop("echipe_start", None)
-                    else:
-                        live["echipe_start"] = {
-                            home: {"formatie": home_formation, "jucatori": home_players,
-                                   "pozitii": home_positions},
-                            away: {"formatie": away_formation, "jucatori": away_players,
-                                   "pozitii": away_positions},
-                        }
-                    live["half_minutes"] = configured_half_minutes
-                    live["jucatori_pe_teren"] = configured_players_on_field
-                    live["faza"] = "repriza1"
-                    live["secunde"] = 0
-                    live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
-                    fixture["arbitraj_live"] = live
-                    save_referee_state(path, fixture_id, referee_code, live)
-                    st.rerun()
+                live["half_minutes"] = configured_half_minutes
+                live["jucatori_pe_teren"] = configured_players_on_field
+                live["faza"] = "repriza1"
+                live["secunde"] = 0
+                live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
+                fixture["arbitraj_live"] = live
+                save_referee_state(path, fixture_id, referee_code, live)
+                st.rerun()
         elif phase == "repriza1" and effective_stage == "repriza1":
             if live.get("pornit_la"):
                 if st.button("⏸ Pune cronometrul pe pauză", key=f"ref_pause_{key}"):
@@ -2340,29 +2290,53 @@ def render_live_matches_overview(path):
         st.info("Nu există meciuri live în acest moment.")
         return
     st.caption("Scorul, cronometrul și evenimentele se actualizează automat.")
-    for fixture in ordered_by_stage(live_fixtures):
-        live = fixture.get("arbitraj_live", {})
-        goals_home, goals_away = _live_match_score(data, fixture, live)
-        shown, _, effective, _ = _live_clock(live)
-        phase_names = {"repriza1": "Prima repriză", "repriza1_expirata": "Prelungiri — repriza 1",
-            "prelungiri1": "Prelungiri — repriza 1", "prelungiri1_expirate": "Pauză",
-            "pauza": "Pauză", "repriza2": "A doua repriză",
-            "repriza2_expirata": "Prelungiri — repriza 2", "prelungiri2": "Prelungiri — repriza 2",
-            "prelungiri2_expirate": "Fluier final în așteptare", "final_așteptare": "Fluier final în așteptare"}
-        with st.container(border=True):
-            st.markdown(f"### 🔴 {fixture.get('e1')}  **{goals_home} – {goals_away}**  {fixture.get('e2')}")
-            st.caption(f"Etapa {fixture.get('etapa') or '—'} · {phase_names.get(effective, phase_names.get(live.get('faza'), 'În desfășurare'))} · {shown}")
-            st.caption(f"{live.get('jucatori_pe_teren', data.get('setari_liga', {}).get('jucatori_pe_teren', 11))} jucători/echipă · "
-                       f"{live.get('half_minutes', data.get('setari_liga', {}).get('durata_repriza', 45))} minute/repriză")
-            starting_lineups = live.get("echipe_start", {})
-            if starting_lineups:
-                _render_formation_pitch(starting_lineups, fixture.get("e1"), fixture.get("e2"))
-            for event in reversed(live.get("evenimente", [])[-5:]):
-                minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
-                description = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
-                if event.get("tip") == "Schimbare":
-                    description += f" → {event.get('intra', '—')}"
-                st.write(description)
+    ordered_live = ordered_by_stage(live_fixtures)
+    selected_key = f"live_match_detail_{safe_slug(Path(path).stem)}"
+    selected_id = st.session_state.get(selected_key)
+    selected_fixture = next((fixture for fixture in ordered_live
+                             if str(fixture.get("id")) == str(selected_id)), None)
+    if selected_fixture is None:
+        st.session_state.pop(selected_key, None)
+        for index, fixture in enumerate(ordered_live):
+            live = fixture.get("arbitraj_live", {})
+            goals_home, goals_away = _live_match_score(data, fixture, live)
+            shown, _, _, _ = _live_clock(live)
+            label = (f"🔴 Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} "
+                     f"{goals_home}–{goals_away} {fixture.get('e2')} · {shown}")
+            if st.button(label, key=f"open_live_match_{safe_slug(Path(path).stem)}_{index}", width="stretch"):
+                st.session_state[selected_key] = str(fixture.get("id"))
+                st.rerun()
+        return
+
+    if st.button("← Înapoi la meciurile live", key=f"back_live_match_{safe_slug(Path(path).stem)}"):
+        st.session_state.pop(selected_key, None)
+        st.rerun()
+    live = selected_fixture.get("arbitraj_live", {})
+    goals_home, goals_away = _live_match_score(data, selected_fixture, live)
+    shown, _, effective, _ = _live_clock(live)
+    phase_names = {"repriza1": "Prima repriză", "repriza1_expirata": "Prelungiri — repriza 1",
+        "prelungiri1": "Prelungiri — repriza 1", "prelungiri1_expirate": "Pauză",
+        "pauza": "Pauză", "repriza2": "A doua repriză",
+        "repriza2_expirata": "Prelungiri — repriza 2", "prelungiri2": "Prelungiri — repriza 2",
+        "prelungiri2_expirate": "Fluier final în așteptare", "final_așteptare": "Fluier final în așteptare"}
+    st.markdown(f"### {selected_fixture.get('e1')}  **{goals_home} – {goals_away}**  {selected_fixture.get('e2')}")
+    st.caption(f"Etapa {selected_fixture.get('etapa') or '—'} · "
+               f"{phase_names.get(effective, phase_names.get(live.get('faza'), 'În desfășurare'))} · {shown}")
+    st.caption(f"{live.get('jucatori_pe_teren', data.get('setari_liga', {}).get('jucatori_pe_teren', 11))} jucători/echipă · "
+               f"{live.get('half_minutes', data.get('setari_liga', {}).get('durata_repriza', 45))} minute/repriză")
+    starting_lineups = live.get("echipe_start", {})
+    if starting_lineups:
+        _render_formation_pitch(starting_lineups, selected_fixture.get("e1"), selected_fixture.get("e2"))
+    if live.get("evenimente"):
+        st.markdown("#### Evoluția meciului")
+        for event in sorted(live["evenimente"], key=lambda item: int(item.get("minut", 0) or 0)):
+            minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
+            description = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
+            if event.get("tip") == "Schimbare":
+                description += f" → {event.get('intra', '—')}"
+            st.write(description)
+    else:
+        st.caption("Evenimentele vor apărea aici în timp real.")
 
 
 def render_cards(rows):
@@ -2709,6 +2683,14 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             if fixtures:
                 render_cards([{"Etapa": f.get("etapa"), "Gazdă": f.get("e1"), "Oaspeți": f.get("e2"),
                     "Data": f.get("data", ""), "Status": "Programat"} for f in fixtures])
+                for fixture_index, fixture in enumerate(ordered_by_stage(fixtures)):
+                    with st.expander(f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"):
+                        live = fixture.get("arbitraj_live", {})
+                        starting_lineups = live.get("echipe_start", {})
+                        if starting_lineups:
+                            _render_formation_pitch(starting_lineups, fixture.get("e1"), fixture.get("e2"))
+                        else:
+                            st.info("Formațiile și titularii nu au fost setați încă.")
             else:
                 st.info("Nu există meciuri rămase în program.")
         with match_tabs[2]:
@@ -4354,6 +4336,70 @@ def main():
                                "Oaspeți": f.get("e2"), "Data": f.get("data", ""),
                                "Status": "Programat"}
                               for f in fixtures])
+                configured_players = int(data.get("setari_liga", {}).get("jucatori_pe_teren", 11))
+                formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players, ("4-3-3",))
+                for fixture_index, fixture in enumerate(ordered_by_stage(fixtures)):
+                    fixture_id = str(fixture.get("id", fixture_index))
+                    fixture_slug = safe_slug(fixture_id)
+                    fixture_live = fixture.get("arbitraj_live", {})
+                    saved_lineups = fixture_live.get("echipe_start", {})
+                    with st.expander(
+                        f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"):
+                        if fixture_live.get("faza", "programat") != "programat":
+                            if saved_lineups:
+                                _render_formation_pitch(saved_lineups, fixture.get("e1"), fixture.get("e2"))
+                            else:
+                                st.info("Nu au fost salvate echipe de start pentru acest meci.")
+                        elif role in {"owner", "editor"}:
+                            home_team, away_team = fixture.get("e1"), fixture.get("e2")
+                            home_roster = list(data.get("echipe", {}).get(home_team, {}).get("jucatori", {}))
+                            away_roster = list(data.get("echipe", {}).get(away_team, {}).get("jucatori", {}))
+                            saved_home = saved_lineups.get(home_team, {})
+                            saved_away = saved_lineups.get(away_team, {})
+                            home_formation = saved_home.get("formatie", formations[0])
+                            away_formation = saved_away.get("formatie", formations[0])
+                            home_formation = st.selectbox("Formație", formations,
+                                index=formations.index(home_formation) if home_formation in formations else 0,
+                                key=f"program_formation_home_{fixture_slug}")
+                            home_positions = _starting_lineup_inputs(home_team, home_roster,
+                                home_formation, f"program_start_home_{fixture_slug}",
+                                saved_home.get("pozitii") or dict(zip(
+                                    _formation_position_labels(home_formation), saved_home.get("jucatori", []))))
+                            away_formation = st.selectbox("Formație", formations,
+                                index=formations.index(away_formation) if away_formation in formations else 0,
+                                key=f"program_formation_away_{fixture_slug}")
+                            away_positions = _starting_lineup_inputs(away_team, away_roster,
+                                away_formation, f"program_start_away_{fixture_slug}",
+                                saved_away.get("pozitii") or dict(zip(
+                                    _formation_position_labels(away_formation), saved_away.get("jucatori", []))))
+                            preview = {
+                                home_team: {"formatie": home_formation, "pozitii": home_positions},
+                                away_team: {"formatie": away_formation, "pozitii": away_positions},
+                            }
+                            _render_formation_pitch(preview, home_team, away_team)
+                            if (len(home_roster) < configured_players or len(away_roster) < configured_players):
+                                st.warning(f"Fiecare echipă are nevoie de {configured_players} jucători în lot pentru o echipă de start completă.")
+                            if st.button("Salvează formațiile și titularii",
+                                          key=f"save_program_lineups_{fixture_slug}", type="primary"):
+                                home_players, away_players = list(home_positions.values()), list(away_positions.values())
+                                complete = (len(home_players) == configured_players and len(away_players) == configured_players
+                                    and all(home_players) and all(away_players)
+                                    and len(set(home_players)) == len(home_players)
+                                    and len(set(away_players)) == len(away_players))
+                                if not complete:
+                                    st.error(f"Alege câte un jucător diferit pentru fiecare poziție ({configured_players} pe echipă).")
+                                else:
+                                    fixture_live.setdefault("faza", "programat")
+                                    fixture_live["echipe_start"] = {
+                                        home_team: {"formatie": home_formation, "jucatori": home_players,
+                                                    "pozitii": home_positions},
+                                        away_team: {"formatie": away_formation, "jucatori": away_players,
+                                                    "pozitii": away_positions},
+                                    }
+                                    fixture["arbitraj_live"] = fixture_live
+                                    save_league(path, data)
+                                    st.success("Formațiile și titularii au fost salvați.")
+                                    st.rerun()
                 if st.button("Șterge programul"):
                     data["program"] = []; save_league(path, data); st.rerun()
             elif data["program"]:
@@ -5203,3 +5249,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
