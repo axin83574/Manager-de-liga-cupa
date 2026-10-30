@@ -2410,14 +2410,26 @@ def render_owner_arbitration(data, path, league_key_value):
             changed = True
     if changed:
         save_league(path, data)
-    st.caption("Codurile sunt vizibile doar proprietarului și editorilor. Trimite codul doar arbitrului ales pentru meci.")
-    render_cards([{"Etapa": item.get("etapa") or "—", "Meci": f"{item.get('e1')} – {item.get('e2')}",
-                   "Cod arbitraj": item["arbitraj_cod"],
-                   "Stare": item.get("arbitraj_live", {}).get("faza", "programat")}
-                  for item in ordered_by_stage(fixtures)])
-    selected = st.selectbox("Alege meciul de arbitrat", ordered_by_stage(fixtures),
-        format_func=lambda item: f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')}",
-        key=f"referee_fixture_{safe_slug(league_key_value)}")
+    st.caption("Apasă pe un meci ca să-i deschizi cronometrul și comenzile de arbitraj.")
+    selected_key = f"referee_fixture_detail_{safe_slug(league_key_value)}"
+    selected_id = st.session_state.get(selected_key)
+    selected = next((item for item in fixtures if str(item.get("id")) == str(selected_id)), None)
+    if selected is None:
+        st.session_state.pop(selected_key, None)
+        for index, item in enumerate(ordered_by_stage(fixtures)):
+            live = item.get("arbitraj_live", {})
+            status = live.get("faza", "programat")
+            status_label = "Încheiat" if status == "final" else ("Programat" if status == "programat" else "Live")
+            label = f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')} · {status_label}"
+            if st.button(label, key=f"open_referee_match_{safe_slug(league_key_value)}_{index}", width="stretch"):
+                st.session_state[selected_key] = str(item.get("id"))
+                st.rerun()
+        return
+    if st.button("← Înapoi la meciuri", key=f"back_referee_matches_{safe_slug(league_key_value)}"):
+        st.session_state.pop(selected_key, None)
+        st.rerun()
+    st.caption("Codul de arbitraj pentru acest meci (vizibil doar aici):")
+    st.code(selected["arbitraj_cod"], language=None)
     render_live_arbitration(path, str(selected.get("id")), True)
 
 
@@ -2480,51 +2492,23 @@ def render_live_matches_overview(path):
 
 
 def render_cards(rows):
-    """Render compact rows whose details open only when tapped."""
+    """Render compact, themed rows matching the original app's Treeview tables."""
     rows = list(rows)
     if not rows:
         st.caption("Nu există date de afișat încă.")
         return
-    for index, row in enumerate(rows):
-        if row.get("Jucător"):
-            title = f"⚽ {row['Jucător']} · {row.get('Echipă', row.get('Echipă actuală după transferuri', ''))}"
-        elif row.get("Gazdă") and row.get("Oaspeți"):
-            title = f"Etapa {row.get('Etapa') or '—'} · {row['Gazdă']} – {row['Oaspeți']}"
-        elif row.get("Meci"):
-            title = f"⚽ Meci · Etapa {row.get('Etapa') or '—'}"
-        elif row.get("Echipă") and row.get("Loc"):
-            title = f"🏟️ {row['Loc']} · {row['Echipă']}"
-        else:
-            first_key = next(iter(row), "Detalii")
-            title = f"{tr(first_key)} · {row.get(first_key, 'Detalii')}"
-        with st.expander(str(tr(title)), expanded=False):
-            match_detail = row.get("_meci")
-            if match_detail:
-                render_match_history_details(match_detail)
-            fixture_detail = row.get("_fixture")
-            if fixture_detail:
-                league_data = row.get("_league_data", {})
-                live = fixture_detail.get("arbitraj_live", {})
-                home, away = fixture_detail.get("e1", "Gazde"), fixture_detail.get("e2", "Oaspeți")
-                if live.get("echipe_start"):
-                    _render_formation_pitch(live["echipe_start"], home, away)
-                if live.get("evenimente"):
-                    for event in sorted(live["evenimente"], key=lambda item: int(item.get("minut", 0) or 0)):
-                        minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
-                        detail = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
-                        if event.get("tip") == "Schimbare":
-                            detail += f" → {event.get('intra', '—')}"
-                        st.write(detail)
-                elif live.get("faza", "programat") != "programat":
-                    st.caption("Evenimentele live vor apărea aici.")
-                if live.get("faza", "programat") != "programat":
-                    score_home, score_away = _live_match_score(league_data, fixture_detail, live)
-                    st.markdown(f"**Scor live: {home} {score_home}–{score_away} {away}**")
-            for label, value in row.items():
-                if str(label).startswith("_"):
-                    continue
-                shown = tr(value) if value not in (None, "") else "–"
-                st.markdown(f"**{tr(label)}:** {shown}")
+    columns = list(dict.fromkeys(key for row in rows for key in row))
+    head = "".join(f"<th>{html.escape(str(tr(column)))}</th>" for column in columns)
+    body_rows = []
+    for row in rows:
+        cells = "".join(
+            f"<td>{html.escape(str(tr(row.get(column)) if row.get(column) not in (None, '') else '–'))}</td>"
+            for column in columns)
+        body_rows.append(f"<tr>{cells}</tr>")
+    markup = ("<div class='league-table-wrap'><table class='league-table'>"
+              f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
+              "</table></div>")
+    st.markdown(markup, unsafe_allow_html=True)
 
 
 def _match_records(data):
@@ -2732,11 +2716,10 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             player_stats = (data.get("echipe", {}).get(saved_selection.get("echipa"), {})
                             .get("jucatori", {}).get(saved_selection.get("jucator"), {}))
             if player_stats:
-                with st.expander("Statisticile mele în această ligă", expanded=False):
-                    stat_cols = st.columns(4)
-                    for col, label, key in zip(stat_cols, ("Goluri", "Assisturi", "Galbene", "Roșii"),
-                            ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
-                        col.metric(label, player_stats.get(key, 0))
+                stat_cols = st.columns(4)
+                for col, label, key in zip(stat_cols, ("Goluri", "Assisturi", "Galbene", "Roșii"),
+                        ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+                    col.metric(label, player_stats.get(key, 0))
     can_choose_player = username or (guest_profile and guest_profile.get("kind") == "jucator") or (
         guest_invite and guest_invite.get("access_method") == "legacy"
         and guest_invite["invitation"].get("tip") == "jucator")
@@ -2812,6 +2795,8 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                                      width="stretch"):
                         st.session_state[viewer_player_key] = player_name
                         st.rerun()
+                    column.caption(f"{player_info.get('pozitie') or 'Poziție nespecificată'} · "
+                                   f"{player_info.get('goluri', 0)} goluri · {player_info.get('asisturi', 0)} assisturi")
             else:
                 st.info("Lotul echipei este gol.")
     with tabs[3]:
@@ -2846,8 +2831,10 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             else:
                 st.info("Nu există încă meciuri înregistrate în această ligă.")
         with match_tabs[1]:
+            st.subheader("Program")
             fixtures = pending_fixtures(data)
             if fixtures:
+                st.caption("Apasă pe un meci ca să vezi echipele de start și formațiile salvate.")
                 for fixture_index, fixture in enumerate(ordered_by_stage(fixtures)):
                     with st.expander(f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"):
                         live = fixture.get("arbitraj_live", {})
@@ -2866,36 +2853,35 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     with tabs[4]:
         for cup in data.get("cupe", []):
             st.markdown(f"### {'🏅 ' if cup.get('super') else ''}{cup.get('nume', 'Cupa')} · {cup.get('status', '')}")
-            for round_index, round_data in enumerate(cup.get("runde", [])):
-                for match_index, slot in enumerate(round_data.get("meciuri", [])):
+            for round_data in cup.get("runde", []):
+                st.markdown(f"**{round_data.get('nume', 'Runda')}**")
+                for slot in round_data.get("meciuri", []):
                     match = slot.get("meci")
-                    returned = slot.get("meci_retur")
-                    home, away = slot.get("e1") or "—", slot.get("e2") or "—"
-                    label = (f"{round_data.get('nume', f'Runda {round_index + 1}')} · "
-                             f"Meciul {match_index + 1} · {home} – {away}")
-                    with st.expander(label, expanded=False):
-                        if match:
-                            render_match_history_details(match)
-                            if cup.get("tur_retur"):
-                                if returned:
-                                    st.markdown("**Retur**")
-                                    render_match_history_details(returned)
-                                    aggregate_home = match["goluri_e1"] + returned["goluri_e2"]
-                                    aggregate_away = match["goluri_e2"] + returned["goluri_e1"]
-                                    st.caption(f"Scor agregat: {match['e1']} {aggregate_home} – {aggregate_away} {match['e2']} · se califică {slot.get('castigator') or 'urmează returul'}")
-                                    render_motm_voting(data, returned, entry["path"], username, profile, guest_invite,
-                                        widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}")
-                                else:
-                                    st.caption("Returul urmează.")
-                            elif slot.get("castigator"):
-                                st.caption(f"Se califică {slot.get('castigator')}")
-                            render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
-                                widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
-                        elif slot.get("castigator"):
-                            st.caption(f"{slot['castigator']} avansează cu tur liber.")
+                    if match:
+                        substitutions = match_substitution_summary(match)
+                        if substitutions != "–":
+                            st.caption(f"Schimbări: {substitutions}")
+                        if cup.get("tur_retur"):
+                            st.write(f"Tur: {match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']}")
+                            returned = slot.get("meci_retur")
+                            if returned:
+                                substitutions = match_substitution_summary(returned)
+                                if substitutions != "–":
+                                    st.caption(f"Schimbări retur: {substitutions}")
+                                aggregate_home = match["goluri_e1"] + returned["goluri_e2"]
+                                aggregate_away = match["goluri_e2"] + returned["goluri_e1"]
+                                st.write(f"Retur: {returned['e1']} {returned['goluri_e1']} – {returned['goluri_e2']} {returned['e2']}")
+                                st.caption(f"Scor agregat {match['e1']} {aggregate_home} – {aggregate_away} {match['e2']} · se califică {slot.get('castigator') or 'urmează returul'}")
+                                render_motm_voting(data, returned, entry["path"], username, profile, guest_invite,
+                                    widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}")
+                            else:
+                                st.caption("Returul urmează.")
                         else:
-                            st.caption("Meci de jucat" if home != "—" and away != "—"
-                                       else "Echipele se stabilesc după runda anterioară.")
+                            st.write(f"{match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']} · câștigă {slot.get('castigator')}")
+                        render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
+                            widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
+                    else:
+                        st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
     with tabs[1]:
         st.subheader("Statistici jucători")
         stat_sections = (
@@ -3226,8 +3212,7 @@ def render_player_dashboard(username, profile, paths):
                 seen_matches.add(match_id)
                 played_rows.append({"Ligă": league_name, "Competiție": competition,
                     "Etapa": match.get("etapa") or "—",
-                    "Meci": f"{match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}",
-                    "_meci": match})
+                    "Meci": f"{match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}"})
 
             for fixture in pending_fixtures(league_data):
                 if item["current_team"] not in (fixture.get("e1"), fixture.get("e2")):
@@ -3235,8 +3220,7 @@ def render_player_dashboard(username, profile, paths):
                 phase = fixture.get("arbitraj_live", {}).get("faza", "programat")
                 row = {"Ligă": league_name, "Etapa": fixture.get("etapa") or "—",
                        "Competiție": "Liga", "Data": fixture.get("data") or "Nesetată",
-                       "Meci": f"{fixture.get('e1')} – {fixture.get('e2')}",
-                       "_fixture": fixture, "_league_data": league_data}
+                       "Meci": f"{fixture.get('e1')} – {fixture.get('e2')}"}
                 if phase not in {"programat", "final"}:
                     live = fixture.get("arbitraj_live", {})
                     score_home, score_away = _live_match_score(league_data, fixture, live)
@@ -3277,12 +3261,11 @@ def render_player_dashboard(username, profile, paths):
                     current_team, current_player = transfer.get("la"), transfer.get("nume_nou", current_player)
 
         with player_tabs[0]:
-            with st.expander("Statisticile totale din toate ligile", expanded=False):
-                metric_cols = st.columns(5)
-                for col, label, field in zip(metric_cols,
-                    (tr("Goluri"), tr("Assisturi"), tr("Cartonașe galbene"), tr("Cartonașe roșii"), tr("Omul meciului")),
-                    ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
-                    col.metric(label, totals[field])
+            metric_cols = st.columns(5)
+            for col, label, field in zip(metric_cols,
+                (tr("Goluri"), tr("Assisturi"), tr("Cartonașe galbene"), tr("Cartonașe roșii"), tr("Omul meciului")),
+                ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii", "omul_meciului")):
+                col.metric(label, totals[field])
             st.markdown(f"#### {tr('Pe fiecare ligă')}")
             render_cards(stats_rows)
         with player_tabs[1]:
@@ -4309,6 +4292,7 @@ def main():
                         if column.button(f"{player_name}", key=f"open_player_{league_slug}_{safe_slug(selected_team_name)}_{index}", width="stretch"):
                             st.session_state[player_state_key] = player_name
                             st.rerun()
+                        column.caption(f"{position} · {stats.get('goluri', 0)} goluri · {stats.get('asisturi', 0)} assisturi")
                 else:
                     st.info("Lotul echipei este gol.")
 
@@ -4519,6 +4503,8 @@ def main():
                                 "e1": fixture_home, "e2": fixture_away, "data": fixture_date.strip(), "meci_id": None,
                                 "arbitraj_cod": new_referee_code()})
                             save_league(path, data); st.success("Meciul a fost adăugat în program."); st.rerun()
+            st.subheader("Program")
+            st.caption("Apasă pe un meci pentru a alege formațiile și echipa de start.")
             fixtures = pending_fixtures(data)
             if fixtures:
                 configured_players = int(data.get("setari_liga", {}).get("jucatori_pe_teren", 11))
@@ -4720,7 +4706,7 @@ def main():
                                 f"{played['goluri_e1']}–{played['goluri_e2']} {played['e2']}")
                         else:
                             match_title = f"Meciul {mi + 1} · {home_cup or 'Echipa 1'} – {away_cup or 'așteaptă'}"
-                        with st.expander(match_title, expanded=False):
+                        with st.container(border=True):
                             st.caption(f"Meciul {mi + 1}")
                             if played:
                                 substitutions = match_substitution_summary(played)
@@ -4883,7 +4869,8 @@ def main():
                     elif st.button("Salvează formatul Supercupei", key=f"save_supercup_format_{selected_supercup['id']}"):
                         selected_supercup["tur_retur"] = formats[new_format]
                         save_league(path, data); st.rerun()
-                with st.expander(f"Finală · {home_super or '—'} — {away_super or '—'}", expanded=False):
+                with st.container(border=True):
+                    st.markdown(f"#### Finala · {home_super or '—'} — {away_super or '—'}")
                     played_super = final_slot.get("meci")
                     if played_super:
                         substitutions = match_substitution_summary(played_super)
