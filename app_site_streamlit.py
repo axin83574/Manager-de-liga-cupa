@@ -896,6 +896,26 @@ def render_match_player_contributions(match):
     return bool(contributions)
 
 
+def render_match_lineup_substitutions(match):
+    teams = [match.get("e1"), match.get("e2")]
+    substitutions = [event for event in match.get("evenimente", [])
+                     if event.get("tip") == "Schimbare"]
+    if not substitutions:
+        return
+    columns = st.columns(2)
+    for column, team in zip(columns, teams):
+        with column:
+            st.markdown(f"**{team} · Schimbări**")
+            team_substitutions = [event for event in substitutions if event.get("echipa") == team]
+            if team_substitutions:
+                for event in sorted(team_substitutions,
+                                    key=lambda item: int(item.get("minut", 0) or 0)):
+                    minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
+                    st.caption(f"{minute} · {event.get('jucator', '—')} → {event.get('intra', '—')}")
+            else:
+                st.caption("Fără schimbări")
+
+
 def render_match_history_details(match):
     st.markdown(f"**{match.get('e1')} {match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}**")
     if match.get("masa_verde"):
@@ -905,6 +925,7 @@ def render_match_history_details(match):
     if starting_lineups:
         st.markdown("**Echipe de start**")
         _render_formation_pitch(starting_lineups, match.get("e1"), match.get("e2"))
+        render_match_lineup_substitutions(match)
     events = sorted(match.get("evenimente", []),
                     key=lambda event: int(event.get("minut", 0) or 0))
     if events:
@@ -4232,6 +4253,8 @@ def main():
                                         int(edited_round) or None, walkover=match_to_edit.get("masa_verde"),
                                         reason=match_to_edit.get("motiv_mv", ""))
                                     corrected["id"] = old_id
+                                    if match_to_edit.get("echipe_start"):
+                                        corrected["echipe_start"] = copy.deepcopy(match_to_edit["echipe_start"])
                                     if "voturi_motm" in match_to_edit:
                                         corrected["voturi_motm"] = match_to_edit["voturi_motm"]
                                     apply_match(data, corrected)
@@ -4295,6 +4318,10 @@ def main():
                     else:
                         match = build_match(home, away, events, int(round_no) or None,
                                             winner if walkover else None, reason or "")
+                        saved_lineups = (scheduled.get("arbitraj_live", {}).get("echipe_start", {})
+                                         if scheduled else {})
+                        if saved_lineups:
+                            match["echipe_start"] = copy.deepcopy(saved_lineups)
                         apply_match(data, match)
                         if scheduled:
                             scheduled["e1"], scheduled["e2"] = home, away
@@ -4302,6 +4329,8 @@ def main():
                             scheduled["arbitraj_live"] = {"faza": "final", "half_minutes": 45, "secunde": 0,
                                 "minute_extra": 0, "minute_extra_total": 0, "pornit_la": None,
                                 "evenimente": copy.deepcopy(match.get("evenimente", []))}
+                            if saved_lineups:
+                                scheduled["arbitraj_live"]["echipe_start"] = copy.deepcopy(saved_lineups)
                         st.session_state.pop(f"match_draft_{draft_id}", None)
                         save_league(path, data); st.success("Meci salvat."); st.rerun()
             st.subheader("Program")
