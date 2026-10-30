@@ -106,6 +106,14 @@ def normalizeaza_date(data):
     settings.setdefault("supercup_leg_format", "single")
     settings.setdefault("supercup_tie_resolution", "penalties")
     settings.setdefault("substitution_rule", "5_no_return")
+    try:
+        settings["durata_repriza"] = max(1, min(90, int(settings.get("durata_repriza", 45))))
+    except (TypeError, ValueError):
+        settings["durata_repriza"] = 45
+    try:
+        settings["jucatori_pe_teren"] = max(1, min(11, int(settings.get("jucatori_pe_teren", 11))))
+    except (TypeError, ValueError):
+        settings["jucatori_pe_teren"] = 11
     data["setari_liga"] = settings
     for key, default in (("echipe", {}), ("istoric_meciuri", []), ("program", []),
                          ("transferuri", []), ("cupe", []), ("invitatii", []), ("sterse", []),
@@ -1825,6 +1833,9 @@ def _live_set_running(live, running):
 @st.fragment(run_every=2)
 def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     data = load_league(path)
+    league_settings = data.get("setari_liga", {})
+    configured_half_minutes = int(league_settings.get("durata_repriza", 45))
+    configured_players_on_field = int(league_settings.get("jucatori_pe_teren", 11))
     fixture = _fixture_for_id(data, fixture_id)
     if not fixture:
         st.warning("Meciul nu mai există în program.")
@@ -1835,7 +1846,8 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
         "evenimente": [],
     })
     live.setdefault("evenimente", [])
-    live.setdefault("half_minutes", 45)
+    live.setdefault("half_minutes", configured_half_minutes)
+    live.setdefault("jucatori_pe_teren", configured_players_on_field)
     live.setdefault("secunde", 0)
     live.setdefault("faza", "programat")
     live.setdefault("pornit_la", None)
@@ -1861,17 +1873,19 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     clock_col.metric("Cronometru", _live_clock_text(live))
     phase_col.metric("Stare", status_labels.get(effective_stage, status_labels.get(live["faza"], "În desfășurare")))
     st.caption(f"Minutul meciului: {shown_minute}")
+    st.caption(f"Format: {live.get('jucatori_pe_teren', configured_players_on_field)} jucători/echipă · "
+               f"{live.get('half_minutes', configured_half_minutes)} minute/repriză")
     if can_edit:
         key = safe_slug(str(fixture_id))
         phase = live.get("faza", "programat")
         if phase == "programat":
+            st.info(f"Fiecare repriză durează {configured_half_minutes} minute. "
+                    f"Fiecare echipă are {configured_players_on_field} jucători pe teren.")
             with st.form(f"referee_setup_{key}"):
-                half_minutes = st.number_input("Durata unei reprize (minute)", min_value=1,
-                    max_value=90, value=int(live.get("half_minutes", 45)), step=1,
-                    key=f"ref_half_len_{key}")
                 start_match = st.form_submit_button("Pornește prima repriză", type="primary")
             if start_match:
-                live["half_minutes"] = int(half_minutes)
+                live["half_minutes"] = configured_half_minutes
+                live["jucatori_pe_teren"] = configured_players_on_field
                 live["faza"] = "repriza1"
                 live["secunde"] = 0
                 live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -2131,6 +2145,8 @@ def render_live_matches_overview(path):
         with st.container(border=True):
             st.markdown(f"### 🔴 {fixture.get('e1')}  **{goals_home} – {goals_away}**  {fixture.get('e2')}")
             st.caption(f"Etapa {fixture.get('etapa') or '—'} · {phase_names.get(effective, phase_names.get(live.get('faza'), 'În desfășurare'))} · {shown}")
+            st.caption(f"{live.get('jucatori_pe_teren', data.get('setari_liga', {}).get('jucatori_pe_teren', 11))} jucători/echipă · "
+                       f"{live.get('half_minutes', data.get('setari_liga', {}).get('durata_repriza', 45))} minute/repriză")
             for event in reversed(live.get("evenimente", [])[-5:]):
                 minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
                 description = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
@@ -3562,6 +3578,24 @@ def main():
         rename = st.text_input("Denumire", value=data["nume_liga"], key=f"rename_{settings_widget_id}")
         if st.button("Salvează denumirea") and rename.strip():
             data["nume_liga"] = rename.strip(); save_league(path, data); st.rerun()
+        st.markdown("**Durata și formatul meciului**")
+        league_settings = data.setdefault("setari_liga", {})
+        with st.form(f"match_format_settings_{settings_widget_id}"):
+            format_cols = st.columns(2)
+            half_duration = format_cols[0].number_input("Durata unei reprize (minute)",
+                min_value=1, max_value=90, value=int(league_settings.get("durata_repriza", 45)),
+                step=1, key=f"league_half_duration_{settings_widget_id}")
+            players_per_team = format_cols[1].number_input("Jucători pe teren pentru fiecare echipă",
+                min_value=1, max_value=11, value=int(league_settings.get("jucatori_pe_teren", 11)),
+                step=1, key=f"league_players_on_field_{settings_widget_id}")
+            save_match_format = st.form_submit_button("Salvează formatul meciului", type="primary")
+        if save_match_format:
+            league_settings["durata_repriza"] = int(half_duration)
+            league_settings["jucatori_pe_teren"] = int(players_per_team)
+            save_league(path, data)
+            st.success("Durata reprizelor și numărul de jucători au fost salvate.")
+            st.rerun()
+        st.divider()
         st.markdown("**Votul pentru omul meciului**")
         voting_modes = {
             "Spectatorii votează; jucătorii echipelor din meci nu votează": "no_players",
