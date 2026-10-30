@@ -387,6 +387,7 @@ def get_user_leagues(username, include_hidden=False):
         for row in all_db_league_rows():
             owner = row.get("owner_username", "")
             data = row.get("data") or {}
+            member = None
             role = "owner" if owner.casefold() == username.casefold() else None
             if role is None:
                 member = next((m for m in data.get("membri", [])
@@ -395,8 +396,10 @@ def get_user_leagues(username, include_hidden=False):
                 if member:
                     role = member.get("rol", "vizitator")
             if role:
+                member_team = member.get("echipa_manager") if role == "manager" and owner.casefold() != username.casefold() else None
                 entries.append({"path": db_league_path(owner, row["id"]), "role": role,
-                                "owner": owner, "updated_at": row.get("updated_at", "")})
+                                "owner": owner, "team": member_team,
+                                "updated_at": row.get("updated_at", "")})
         entries.sort(key=lambda entry: entry.get("updated_at", ""), reverse=True)
         entries = favorite_first(entries)
         if include_hidden:
@@ -419,7 +422,8 @@ def get_user_leagues(username, include_hidden=False):
             access = next((m for m in data.get("membri", [])
                            if str(m.get("username", "")).casefold() == username.casefold()), None)
             if access and access.get("activ", True):
-                entries.append({"path": path, "role": access.get("rol", "vizitator"), "owner": folder.name})
+                entries.append({"path": path, "role": access.get("rol", "vizitator"),
+                                "owner": folder.name, "team": access.get("echipa_manager")})
     entries.sort(key=lambda entry: entry["path"].stat().st_mtime if Path(entry["path"]).exists() else 0,
                  reverse=True)
     entries = favorite_first(entries)
@@ -2007,6 +2011,121 @@ def _starting_lineup_inputs(team_name, roster, formation, widget_prefix, initial
             key=f"{widget_prefix}_{safe_slug(team_name)}_{safe_slug(formation)}_{safe_slug(position)}")
         positions[position] = selected
     return positions
+
+
+def _team_manager_member(data, username):
+    return next((member for member in data.get("membri", [])
+        if str(member.get("username", "")).casefold() == str(username).casefold()
+        and member.get("activ", True) and member.get("rol") == "manager"), None)
+
+
+def save_manager_player(path, username, player_name, position):
+    fresh = load_league(path)
+    member = _team_manager_member(fresh, username)
+    team_name = member.get("echipa_manager") if member else None
+    if not team_name or team_name not in fresh.get("echipe", {}):
+        raise ValueError("Nu ai o echipă atribuită pentru administrare.")
+    cleaned_name = str(player_name or "").strip()
+    roster = fresh["echipe"][team_name].setdefault("jucatori", {})
+    if not cleaned_name:
+        raise ValueError("Introdu numele jucătorului.")
+    if any(str(name).casefold() == cleaned_name.casefold() for name in roster):
+        raise ValueError("Există deja un jucător cu acest nume în echipă.")
+    stats = dict(STATS_JUCATOR)
+    if position and position != "Nespecificată":
+        stats["pozitie"] = position
+    roster[cleaned_name] = stats
+    _store_league(path, fresh)
+
+
+def save_manager_lineup(path, username, fixture_id, team_name, formation, positions):
+    fresh = load_league(path)
+    member = _team_manager_member(fresh, username)
+    if not member or member.get("echipa_manager") != team_name:
+        raise ValueError("Nu ai permisiunea să modifici formația acestei echipe.")
+    fixture = _fixture_for_id(fresh, fixture_id)
+    if not fixture or team_name not in (fixture.get("e1"), fixture.get("e2")):
+        raise ValueError("Meciul nu aparține echipei tale.")
+    if fixture.get("arbitraj_live", {}).get("faza", "programat") != "programat":
+        raise ValueError("Formația poate fi stabilită doar înainte de începerea meciului.")
+    players_on_field = int(fresh.get("setari_liga", {}).get("jucatori_pe_teren", 11))
+    allowed_formations = FORMATIONS_BY_PLAYER_COUNT.get(players_on_field, ())
+    if formation not in allowed_formations:
+        raise ValueError("Formația nu corespunde numărului de jucători setat în ligă.")
+    player_names = list(positions.values())
+    roster = fresh.get("echipe", {}).get(team_name, {}).get("jucatori", {})
+    if (len(player_names) != players_on_field or any(not name or name not in roster for name in player_names)
+            or len(set(player_names)) != len(player_names)):
+        raise ValueError(f"Alege {players_on_field} jucători diferiți din lotul echipei.")
+    live = fixture.setdefault("arbitraj_live", {"faza": "programat", "evenimente": []})
+    live.setdefault("echipe_start", {})[team_name] = {
+        "formatie": formation, "jucatori": player_names, "pozitii": dict(positions)}
+    _store_league(path, fresh)
+
+
+def render_team_manager_panel(data, path, username, team_name):
+    st.subheader("Administrarea echipei")
+    if not team_name or team_name not in data.get("echipe", {}):
+        st.warning("Proprietarul ligii trebuie să-ți atribuie o echipă în secțiunea Membri.")
+        return
+    st.markdown(f"### ⚽ {team_name}")
+    league_slug = safe_slug(str(path))
+    with st.form(f"manager_add_player_{league_slug}"):
+        player_name = st.text_input("Numele jucătorului")
+        position = st.selectbox("Poziția", ["Nespecificată", *POZITII_FOTBAL])
+        add_player = st.form_submit_button("Adaugă jucător", type="primary")
+    if add_player:
+        try:
+            save_manager_player(path, username, player_name, position)
+            st.success("Jucătorul a fost adăugat în lot.")
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+    st.divider()
+    st.markdown("#### Echipa de start")
+    fixtures = [fixture for fixture in pending_fixtures(data)
+                if team_name in (fixture.get("e1"), fixture.get("e2"))]
+    if not fixtures:
+        st.info("Nu există meciuri programate pentru echipa ta.")
+        return
+    configured_players = int(data.get("setari_liga", {}).get("jucatori_pe_teren", 11))
+    formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players, ("4-3-3",))
+    roster = list(data.get("echipe", {}).get(team_name, {}).get("jucatori", {}))
+    for index, fixture in enumerate(ordered_by_stage(fixtures)):
+        fixture_id = str(fixture.get("id", index))
+        fixture_slug = safe_slug(f"{path}_{fixture_id}")
+        live = fixture.get("arbitraj_live", {})
+        lineups = live.get("echipe_start", {})
+        with st.expander(f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"):
+            saved = lineups.get(team_name, {})
+            if live.get("faza", "programat") != "programat":
+                if saved:
+                    _render_formation_pitch(lineups, fixture.get("e1"), fixture.get("e2"))
+                else:
+                    st.info("Meciul a început; echipa de start nu a fost salvată.")
+                continue
+            formation = saved.get("formatie", formations[0])
+            formation = st.selectbox("Formație", formations,
+                index=formations.index(formation) if formation in formations else 0,
+                key=f"manager_formation_{fixture_slug}")
+            initial_positions = saved.get("pozitii") or dict(zip(
+                _formation_position_labels(formation), saved.get("jucatori", [])))
+            positions = _starting_lineup_inputs(team_name, roster, formation,
+                f"manager_lineup_{fixture_slug}", initial_positions)
+            preview = copy.deepcopy(lineups)
+            preview[team_name] = {"formatie": formation, "pozitii": positions}
+            _render_formation_pitch(preview, fixture.get("e1"), fixture.get("e2"))
+            if len(roster) < configured_players:
+                st.warning(f"Adaugă încă {configured_players - len(roster)} jucător(i) în lot pentru a completa echipa de start.")
+            if st.button("Salvează echipa de start", key=f"manager_save_lineup_{fixture_slug}",
+                         type="primary", disabled=len(roster) < configured_players):
+                try:
+                    save_manager_lineup(path, username, fixture_id, team_name, formation, positions)
+                    st.success("Echipa de start a fost salvată pentru acest meci.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
 
 @st.fragment(run_every=2)
@@ -3794,6 +3913,19 @@ def main():
     if role not in {"owner", "editor"}:
         st.title(data.get("nume_liga", "Liga"))
         st.caption(f"Partajată de @{owner}")
+        if role == "manager":
+            manager_view_key = f"manager_team_view_{safe_slug(league_key(selected_entry))}"
+            with st.sidebar:
+                st.divider()
+                if st.button("⚽ Administrează echipa", width="stretch", key="open_team_manager"):
+                    st.session_state[manager_view_key] = True
+                    st.rerun()
+            if st.session_state.get(manager_view_key):
+                if st.button("← Înapoi la ligă", key="back_from_team_manager"):
+                    st.session_state.pop(manager_view_key, None)
+                    st.rerun()
+                render_team_manager_panel(data, path, username, selected_entry.get("team"))
+                return
         render_view_only(data, username, profile, selected_entry,
                          guest_entry if guest_entry and guest_entry.get("access_method") == "legacy" else None,
                          guest_profile)
@@ -4988,7 +5120,8 @@ def main():
         if members_view == "Coduri":
             if role != "owner":
                 st.info("Doar proprietarul ligii poate administra codurile de acces.")
-                st.write(f"Proprietar: **@{owner}** · Rolul tău: **{'Editor' if role == 'editor' else 'Vizitator'}**")
+                role_label = {"editor": "Editor", "manager": "Manager de echipă"}.get(role, "Vizitator")
+                st.write(f"Proprietar: **@{owner}** · Rolul tău: **{role_label}**")
             else:
                 previous_codes = data.get("coduri_invitat", {})
                 previous_codes = copy.deepcopy(previous_codes) if isinstance(previous_codes, dict) else {}
@@ -5031,6 +5164,7 @@ def main():
                     for index, member in enumerate(member_list):
                         member_name = str(member.get("username", "")).strip()
                         member_role = ("Editor" if member.get("rol") == "editor" else
+                                       "Manager" if member.get("rol") == "manager" else
                                        "Jucător" if member.get("tip") == "jucator" else "Spectator")
                         name_col, role_col = st.columns([4, 1])
                         if name_col.button(f"@{member_name}", key=f"open_member_{safe_slug(league_key(selected_entry))}_{index}",
@@ -5045,7 +5179,8 @@ def main():
                     st.session_state.pop(detail_state_key, None)
                     st.rerun()
                 st.markdown(f"### @{member_name}")
-                access_role = "Editor" if selected_member.get("rol") == "editor" else "Vizitator"
+                access_role = {"editor": "Editor", "manager": "Manager de echipă"}.get(
+                    selected_member.get("rol"), "Vizitator")
                 member_type = "Jucător" if selected_member.get("tip") == "jucator" else "Spectator"
                 st.caption(f"Permisiune: {access_role} · Profil în ligă: {member_type}")
 
@@ -5068,12 +5203,33 @@ def main():
                     st.info("Nu are încă un jucător asociat în această ligă.")
 
                 if role == "owner":
-                    role_choice = st.selectbox("Rolul membrului", ["vizitator", "editor"],
-                        index=1 if selected_member.get("rol") == "editor" else 0,
-                        format_func=lambda item: "Editor" if item == "editor" else "Spectator",
+                    role_options = ["vizitator", "editor", "manager"]
+                    current_role = selected_member.get("rol", "vizitator")
+                    role_choice = st.selectbox("Rolul membrului", role_options,
+                        index=role_options.index(current_role) if current_role in role_options else 0,
+                        format_func=lambda item: {"editor": "Editor", "manager": "Manager de echipă",
+                                                  "vizitator": "Spectator"}[item],
                         key=f"member_detail_role_{member_slug}")
+                    manager_team = None
+                    if role_choice == "manager":
+                        manager_teams = list(data.get("echipe", {}))
+                        if manager_teams:
+                            current_manager_team = selected_member.get("echipa_manager")
+                            manager_team = st.selectbox("Echipa administrată", manager_teams,
+                                index=manager_teams.index(current_manager_team)
+                                    if current_manager_team in manager_teams else 0,
+                                key=f"member_manager_team_{member_slug}")
+                        else:
+                            st.info("Adaugă mai întâi o echipă înainte să atribui rolul de manager.")
                     if st.button("Actualizează rolul", key=f"update_member_role_{member_slug}"):
+                        if role_choice == "manager" and not manager_team:
+                            st.error("Alege echipa pe care o va administra.")
+                            st.stop()
                         selected_member["rol"] = role_choice
+                        if role_choice == "manager":
+                            selected_member["echipa_manager"] = manager_team
+                        else:
+                            selected_member.pop("echipa_manager", None)
                         save_league(path, data)
                         st.success("Rolul membrului a fost actualizat.")
                         st.rerun()
