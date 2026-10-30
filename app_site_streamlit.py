@@ -36,6 +36,19 @@ POZITII_FOTBAL = (
 TIPURI_GOL = ("Gol Normal", "Gol din Lovitură Liberă", "Penalty")
 TIPURI_EVENIMENT = TIPURI_GOL + ("Autogol", "Penalty Ratat",
                                  "Cartonaș Galben", "Cartonaș Roșu", "Schimbare")
+FORMATIONS_BY_PLAYER_COUNT = {
+    1: ("0",),
+    2: ("1",),
+    3: ("1-1", "2-0"),
+    4: ("1-1-1", "2-1-0", "1-2-0"),
+    5: ("2-1-1", "1-2-1", "1-1-2"),
+    6: ("2-2-1", "2-1-2", "1-3-1"),
+    7: ("2-3-1", "3-2-1", "2-2-2", "3-1-2"),
+    8: ("3-2-2", "2-3-2", "2-2-3"),
+    9: ("3-3-2", "3-2-3", "2-4-2", "2-3-3"),
+    10: ("4-3-2", "3-4-2", "4-2-3", "3-3-3"),
+    11: ("4-3-3", "4-4-2", "3-5-2", "5-3-2", "4-2-4", "4-5-1", "3-4-3"),
+}
 def tr(text):
     """Keep existing UI calls unchanged; the application currently runs in Romanian only."""
     return str(text)
@@ -888,6 +901,15 @@ def render_match_history_details(match):
     if match.get("masa_verde"):
         st.caption(f"Victorie la masa verde pentru {match.get('masa_verde')}"
                    + (f" · {match.get('motiv_mv')}" if match.get("motiv_mv") else ""))
+    starting_lineups = match.get("echipe_start", {})
+    if starting_lineups:
+        st.markdown("**Echipe de start**")
+        lineup_columns = st.columns(2)
+        for column, team_name in zip(lineup_columns, (match.get("e1"), match.get("e2"))):
+            lineup = starting_lineups.get(team_name, {})
+            if lineup:
+                column.markdown(f"**{team_name} · {lineup.get('formatie', '—')}**")
+                column.write(" · ".join(lineup.get("jucatori", [])))
     events = sorted(match.get("evenimente", []),
                     key=lambda event: int(event.get("minut", 0) or 0))
     if events:
@@ -1747,8 +1769,15 @@ def save_referee_state(path, fixture_id, access_code, live, finish=False):
         if not fixture.get("meci_id"):
             match = build_match(fixture.get("e1", "Gazde"), fixture.get("e2", "Oaspeți"),
                                 updated_live.get("evenimente", []), fixture.get("etapa"))
+            if updated_live.get("echipe_start"):
+                match["echipe_start"] = copy.deepcopy(updated_live["echipe_start"])
             apply_match(fresh, match)
             fixture["meci_id"] = match["id"]
+        elif updated_live.get("echipe_start"):
+            recorded = next((item for item in fresh.get("istoric_meciuri", [])
+                             if str(item.get("id")) == str(fixture.get("meci_id"))), None)
+            if recorded:
+                recorded["echipe_start"] = copy.deepcopy(updated_live["echipe_start"])
         updated_live["faza"] = "final"
         updated_live["pornit_la"] = None
     fixture["arbitraj_live"] = updated_live
@@ -1911,23 +1940,65 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     st.caption(f"Minutul meciului: {shown_minute}")
     st.caption(f"Format: {live.get('jucatori_pe_teren', configured_players_on_field)} jucători/echipă · "
                f"{live.get('half_minutes', configured_half_minutes)} minute/repriză")
+    starting_lineups = live.get("echipe_start", {})
+    if starting_lineups:
+        st.markdown("#### Echipe de start")
+        lineup_columns = st.columns(2)
+        for column, team_name in zip(lineup_columns, (home, away)):
+            lineup = starting_lineups.get(team_name, {})
+            if lineup:
+                column.markdown(f"**{team_name} · {lineup.get('formatie', '—')}**")
+                column.write(" · ".join(lineup.get("jucatori", [])))
     if can_edit:
         key = safe_slug(str(fixture_id))
         phase = live.get("faza", "programat")
         if phase == "programat":
             st.info(f"Fiecare repriză durează {configured_half_minutes} minute. "
                     f"Fiecare echipă are {configured_players_on_field} jucători pe teren.")
+            home_roster = list(data.get("echipe", {}).get(home, {}).get("jucatori", {}))
+            away_roster = list(data.get("echipe", {}).get(away, {}).get("jucatori", {}))
+            formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players_on_field, ("4-3-3",))
+            can_fill_lineup = (len(home_roster) >= configured_players_on_field
+                               and len(away_roster) >= configured_players_on_field)
             with st.form(f"referee_setup_{key}"):
+                st.markdown("#### Formație și echipa de start")
+                lineup_home, lineup_away = st.columns(2)
+                with lineup_home:
+                    home_formation = st.selectbox(f"Formația · {home}", formations,
+                        key=f"ref_formation_home_{key}")
+                    home_starting_players = st.multiselect(f"Echipa de start · {home}", home_roster,
+                        max_selections=configured_players_on_field, key=f"ref_start_home_{key}")
+                with lineup_away:
+                    away_formation = st.selectbox(f"Formația · {away}", formations,
+                        key=f"ref_formation_away_{key}")
+                    away_starting_players = st.multiselect(f"Echipa de start · {away}", away_roster,
+                        max_selections=configured_players_on_field, key=f"ref_start_away_{key}")
+                skip_lineup = False
+                if not can_fill_lineup:
+                    st.warning("Unul dintre loturi nu are destui jucători pentru numărul setat pe teren.")
+                    skip_lineup = st.checkbox("Pornește fără să înregistrezi echipele de start",
+                        key=f"ref_skip_lineup_{key}")
                 start_match = st.form_submit_button("Pornește prima repriză", type="primary")
             if start_match:
-                live["half_minutes"] = configured_half_minutes
-                live["jucatori_pe_teren"] = configured_players_on_field
-                live["faza"] = "repriza1"
-                live["secunde"] = 0
-                live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
-                fixture["arbitraj_live"] = live
-                save_referee_state(path, fixture_id, referee_code, live)
-                st.rerun()
+                if not skip_lineup and (len(home_starting_players) != configured_players_on_field
+                        or len(away_starting_players) != configured_players_on_field):
+                    st.error(f"Alege exact {configured_players_on_field} jucători pentru fiecare echipă de start.")
+                else:
+                    if skip_lineup:
+                        live.pop("echipe_start", None)
+                    else:
+                        live["echipe_start"] = {
+                            home: {"formatie": home_formation, "jucatori": list(home_starting_players)},
+                            away: {"formatie": away_formation, "jucatori": list(away_starting_players)},
+                        }
+                    live["half_minutes"] = configured_half_minutes
+                    live["jucatori_pe_teren"] = configured_players_on_field
+                    live["faza"] = "repriza1"
+                    live["secunde"] = 0
+                    live["pornit_la"] = dt.datetime.now(dt.timezone.utc).isoformat()
+                    fixture["arbitraj_live"] = live
+                    save_referee_state(path, fixture_id, referee_code, live)
+                    st.rerun()
         elif phase == "repriza1" and effective_stage == "repriza1":
             if live.get("pornit_la"):
                 if st.button("⏸ Pune cronometrul pe pauză", key=f"ref_pause_{key}"):
@@ -2183,6 +2254,14 @@ def render_live_matches_overview(path):
             st.caption(f"Etapa {fixture.get('etapa') or '—'} · {phase_names.get(effective, phase_names.get(live.get('faza'), 'În desfășurare'))} · {shown}")
             st.caption(f"{live.get('jucatori_pe_teren', data.get('setari_liga', {}).get('jucatori_pe_teren', 11))} jucători/echipă · "
                        f"{live.get('half_minutes', data.get('setari_liga', {}).get('durata_repriza', 45))} minute/repriză")
+            starting_lineups = live.get("echipe_start", {})
+            if starting_lineups:
+                lineup_columns = st.columns(2)
+                for column, team_name in zip(lineup_columns, (fixture.get("e1"), fixture.get("e2"))):
+                    lineup = starting_lineups.get(team_name, {})
+                    if lineup:
+                        column.markdown(f"**{team_name} · {lineup.get('formatie', '—')}**")
+                        column.write(" · ".join(lineup.get("jucatori", [])))
             for event in reversed(live.get("evenimente", [])[-5:]):
                 minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
                 description = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
@@ -2527,8 +2606,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                         st.divider()
                         st.markdown("##### ⭐ Votează omul meciului")
                         render_motm_voting(data, selected_match, entry["path"], username, profile, guest_invite,
-                            widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}",
-                            touch_friendly=True)
+                            widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}")
             else:
                 st.info("Nu există încă meciuri înregistrate în această ligă.")
         with match_tabs[1]:
@@ -2566,15 +2644,13 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                                 st.write(f"Retur: {returned['e1']} {returned['goluri_e1']} – {returned['goluri_e2']} {returned['e2']}")
                                 st.caption(f"Scor agregat {match['e1']} {aggregate_home} – {aggregate_away} {match['e2']} · se califică {slot.get('castigator') or 'urmează returul'}")
                                 render_motm_voting(data, returned, entry["path"], username, profile, guest_invite,
-                                    widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}",
-                                    touch_friendly=True)
+                                    widget_key=f"viewer-cup-{cup.get('id')}-{returned.get('id')}")
                             else:
                                 st.caption("Returul urmează.")
                         else:
                             st.write(f"{match['e1']} {match['goluri_e1']} – {match['goluri_e2']} {match['e2']} · câștigă {slot.get('castigator')}")
                         render_motm_voting(data, match, entry["path"], username, profile, guest_invite,
-                            widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}",
-                            touch_friendly=True)
+                            widget_key=f"viewer-cup-{cup.get('id')}-{match.get('id')}")
                     else:
                         st.write(f"{slot.get('e1') or '—'} vs {slot.get('e2') or 'așteaptă'}")
     with tabs[1]:
