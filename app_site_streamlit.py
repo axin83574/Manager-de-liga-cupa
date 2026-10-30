@@ -3779,7 +3779,7 @@ def main():
         if not is_guest:
             with st.sidebar:
                 st.divider()
-            if st.button(f"↩ {tr('Schimbă liga')}", width="stretch", key="change_league_viewer"):
+                if st.button(f"↩ {tr('Schimbă liga')}", width="stretch", key="change_league_viewer"):
                     st.session_state.pop("entered_league", None)
                     st.session_state.pop("active_league_picker", None)
                     st.rerun()
