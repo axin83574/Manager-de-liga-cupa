@@ -1533,6 +1533,42 @@ def rename_team(data, old_name, new_name):
                         if event.get("echipa") == old_name: event["echipa"] = new_name
 
 
+def rename_player(data, team_name, old_name, new_name):
+    new_name = new_name.strip()
+    roster = data.get("echipe", {}).get(team_name, {}).get("jucatori", {})
+    if not new_name or new_name == old_name:
+        raise ValueError("Introdu un nume nou pentru jucător.")
+    if new_name in roster:
+        raise ValueError("Există deja un jucător cu acest nume în echipă.")
+    if old_name not in roster:
+        raise ValueError("Jucătorul nu mai este în lot.")
+    roster[new_name] = roster.pop(old_name)
+
+    def update_references(value):
+        if isinstance(value, list):
+            for item in value:
+                update_references(item)
+        elif isinstance(value, dict):
+            if value.get("echipa") == team_name:
+                for field in ("jucator", "intra", "asist"):
+                    if value.get(field) == old_name:
+                        value[field] = new_name
+            for side, stats_key in (("e1", "mod_e1"), ("e2", "mod_e2")):
+                stats = value.get(stats_key)
+                if value.get(side) == team_name and isinstance(stats, dict) and old_name in stats:
+                    stats[new_name] = stats.pop(old_name)
+            for key, item in value.items():
+                if key != "echipe":
+                    update_references(item)
+
+    update_references({key: value for key, value in data.items() if key != "echipe"})
+    for transfer in data.get("transferuri", []):
+        if transfer.get("de_la") == team_name and transfer.get("jucator") == old_name:
+            transfer["jucator"] = new_name
+        if transfer.get("la") == team_name and transfer.get("nume_nou") == old_name:
+            transfer["nume_nou"] = new_name
+
+
 def apply_match(data, match):
     for team_name in (match["e1"], match["e2"]):
         data["echipe"].setdefault(team_name, {"jucatori": {}, **STATS_ECHIPA})
@@ -3714,93 +3750,180 @@ def main():
 
     if page == "Echipe și jucători":
         st.subheader("Echipe și loturi")
-        with st.form("echipa_noua"):
-            team_name = st.text_input("Adaugă echipă")
-            add_team = st.form_submit_button("Adaugă")
-        if add_team:
-            if not team_name.strip(): st.error("Introdu numele echipei.")
-            elif team_name.strip() in data["echipe"]: st.error("Echipa există deja.")
+        can_edit_roster = role in {"owner", "editor"}
+        league_slug = safe_slug(league_key(selected_entry))
+        team_state_key = f"roster_team_{league_slug}"
+        player_state_key = f"roster_player_{league_slug}"
+        selected_team_name = st.session_state.get(team_state_key)
+        if selected_team_name not in data.get("echipe", {}):
+            st.session_state.pop(team_state_key, None)
+            st.session_state.pop(player_state_key, None)
+            selected_team_name = None
+
+        if not selected_team_name:
+            st.markdown("#### Echipe")
+            if data.get("echipe"):
+                team_names = list(data["echipe"])
+                team_columns = st.columns(2)
+                for index, team_name in enumerate(team_names):
+                    team_info = data["echipe"][team_name]
+                    column = team_columns[index % 2]
+                    if column.button(f"⚽ {team_name}", key=f"open_team_{league_slug}_{index}", width="stretch"):
+                        st.session_state[team_state_key] = team_name
+                        st.session_state.pop(player_state_key, None)
+                        st.rerun()
+                    column.caption(f"{len(team_info.get('jucatori', {}))} jucători · {team_info.get('puncte', 0)} puncte")
             else:
-                data["echipe"][team_name.strip()] = {"jucatori": {}, **STATS_ECHIPA}
-                save_league(path, data); st.rerun()
-        for name, team in data["echipe"].items():
-            trophies = trofee_echipa(data, name)
-            with st.expander(f"{name} · {len(team['jucatori'])} jucători" +
-                             (f" · 🏆 {len(trophies)} trofee" if trophies else "")):
-                st.write(f"{team['meciuri_jucate']} meciuri · {team['puncte']} puncte · "
-                         f"goluri {team['goluri_marcate']}–{team['goluri_primite']}")
-                with st.form(f"jucator_{name}"):
-                    player_name = st.text_input("Jucător nou", key=f"pn_{name}")
-                    player_position = st.selectbox("Poziție", ["Nespecificată", *POZITII_FOTBAL], key=f"pp_{name}")
-                    add_player = st.form_submit_button("Adaugă în lot")
-                if add_player:
-                    if player_name.strip() in team["jucatori"]:
-                        st.error("Jucătorul există deja în lot.")
-                    elif player_name.strip():
-                        team["jucatori"][player_name.strip()] = {**STATS_JUCATOR,
-                            "pozitie": "" if player_position == "Nespecificată" else player_position}
-                        save_league(path, data); st.rerun()
-                if team["jucatori"]:
-                    render_cards([{"Jucător": p, "Poziție": s.get("pozitie") or "–",
-                                   **{k: v for k, v in s.items() if k not in {"pozitie", "_ajustari_statistici"}}}
-                                  for p, s in team["jucatori"].items()])
-                    with st.expander("Corectează statisticile unui jucător"):
-                        st.caption("Corecțiile rămân salvate și după recalcularea statisticilor din istoricul meciurilor.")
-                        edited_player = st.selectbox("Jucător", list(team["jucatori"]),
-                            key=f"manual_stats_player_{safe_slug(name)}")
-                        edited_stats = team["jucatori"][edited_player]
-                        stat_fields = (("goluri", "Goluri"), ("asisturi", "Assisturi"),
-                                       ("cartonase_galbene", "Cartonașe galbene"),
-                                       ("cartonase_rosii", "Cartonașe roșii"))
-                        stat_form_key = f"manual_stats_form_{safe_slug(name)}_{safe_slug(edited_player)}"
-                        with st.form(stat_form_key):
-                            corrected_values = {}
-                            stat_columns = st.columns(2)
-                            for index, (field, label) in enumerate(stat_fields):
-                                corrected_values[field] = stat_columns[index % 2].number_input(
-                                    label, min_value=0, value=int(edited_stats.get(field, 0) or 0),
-                                    step=1, key=f"{stat_form_key}_{field}")
-                            save_player_stats = st.form_submit_button("Salvează statisticile", type="primary")
-                        if save_player_stats:
-                            adjustments = edited_stats.setdefault("_ajustari_statistici", {})
-                            for field, _ in stat_fields:
-                                current_adjustment = int(adjustments.get(field, 0) or 0)
-                                derived_value = int(edited_stats.get(field, 0) or 0) - current_adjustment
-                                edited_stats[field] = int(corrected_values[field])
-                                adjustments[field] = int(corrected_values[field]) - derived_value
+                st.info("Nu există echipe în ligă încă.")
+            if can_edit_roster:
+                st.divider()
+                with st.form(f"new_team_form_{league_slug}"):
+                    new_team_name = st.text_input("Numele echipei")
+                    add_team = st.form_submit_button("Adaugă echipă", type="primary")
+                if add_team:
+                    cleaned_name = new_team_name.strip()
+                    if not cleaned_name:
+                        st.error("Introdu numele echipei.")
+                    elif cleaned_name in data["echipe"]:
+                        st.error("Echipa există deja.")
+                    else:
+                        data["echipe"][cleaned_name] = {"jucatori": {}, **STATS_ECHIPA}
+                        save_league(path, data)
+                        st.session_state[team_state_key] = cleaned_name
+                        st.rerun()
+        else:
+            team = data["echipe"][selected_team_name]
+            selected_player_name = st.session_state.get(player_state_key)
+            if selected_player_name not in team.get("jucatori", {}):
+                st.session_state.pop(player_state_key, None)
+                selected_player_name = None
+
+            if selected_player_name:
+                player_stats = team["jucatori"][selected_player_name]
+                if st.button("← Înapoi la lot", key=f"back_to_roster_{league_slug}"):
+                    st.session_state.pop(player_state_key, None)
+                    st.rerun()
+                st.markdown(f"### {selected_player_name}")
+                st.caption(f"Echipă: {selected_team_name}")
+                trophy_list = trofee_jucator(data, selected_team_name, selected_player_name)
+                if trophy_list:
+                    st.caption("Trofee: " + " · ".join(trophy_list))
+                stat_fields = (("goluri", "Goluri"), ("asisturi", "Assisturi"),
+                               ("cartonase_galbene", "Cartonașe galbene"),
+                               ("cartonase_rosii", "Cartonașe roșii"))
+                with st.form(f"edit_player_form_{league_slug}_{safe_slug(selected_team_name)}_{safe_slug(selected_player_name)}"):
+                    edited_name = st.text_input("Numele jucătorului", value=selected_player_name,
+                        disabled=not can_edit_roster)
+                    positions = ["Nespecificată", *POZITII_FOTBAL]
+                    old_position = player_stats.get("pozitie", "")
+                    position_index = positions.index(old_position) if old_position in positions else 0
+                    edited_position = st.selectbox("Poziția", positions, index=position_index,
+                        disabled=not can_edit_roster)
+                    stat_columns = st.columns(2)
+                    edited_values = {}
+                    for index, (field, label) in enumerate(stat_fields):
+                        edited_values[field] = stat_columns[index % 2].number_input(label,
+                            min_value=0, value=int(player_stats.get(field, 0) or 0), step=1,
+                            disabled=not can_edit_roster,
+                            key=f"edit_{league_slug}_{safe_slug(selected_team_name)}_{safe_slug(selected_player_name)}_{field}")
+                    save_player = st.form_submit_button("Salvează modificările", type="primary",
+                        disabled=not can_edit_roster)
+                if save_player:
+                    new_name = edited_name.strip()
+                    if not new_name:
+                        st.error("Introdu numele jucătorului.")
+                    elif new_name != selected_player_name and new_name in team["jucatori"]:
+                        st.error("Există deja un jucător cu acest nume în echipă.")
+                    else:
+                        if new_name != selected_player_name:
+                            rename_player(data, selected_team_name, selected_player_name, new_name)
+                        updated_stats = data["echipe"][selected_team_name]["jucatori"][new_name]
+                        updated_stats["pozitie"] = "" if edited_position == "Nespecificată" else edited_position
+                        adjustments = updated_stats.setdefault("_ajustari_statistici", {})
+                        for field, _ in stat_fields:
+                            previous_adjustment = int(adjustments.get(field, 0) or 0)
+                            derived_value = int(updated_stats.get(field, 0) or 0) - previous_adjustment
+                            updated_stats[field] = int(edited_values[field])
+                            adjustments[field] = int(edited_values[field]) - derived_value
+                        save_league(path, data)
+                        if new_name != selected_player_name:
+                            users = load_users()
+                            changed_users = False
+                            for account in users.values():
+                                association = account.get("selectii_ligi", {}).get(league_key(selected_entry), {})
+                                if association.get("echipa") == selected_team_name and association.get("jucator") == selected_player_name:
+                                    association["jucator"] = new_name
+                                    changed_users = True
+                            if changed_users:
+                                try:
+                                    save_users(users)
+                                except Exception as exc:
+                                    st.warning(f"Jucătorul a fost redenumit în ligă, dar profilurile nu s-au putut sincroniza: {exc}")
+                        st.session_state[player_state_key] = new_name
+                        st.success("Datele jucătorului au fost actualizate.")
+                        st.rerun()
+                if can_edit_roster and st.button("Șterge jucătorul din lot", key=f"delete_player_{league_slug}_{safe_slug(selected_player_name)}"):
+                    del team["jucatori"][selected_player_name]
+                    st.session_state.pop(player_state_key, None)
+                    save_league(path, data)
+                    st.rerun()
+            else:
+                if st.button("← Înapoi la echipe", key=f"back_to_teams_{league_slug}"):
+                    st.session_state.pop(team_state_key, None)
+                    st.rerun()
+                st.markdown(f"### ⚽ {selected_team_name}")
+                summary = st.columns(3)
+                summary[0].metric("Meciuri", team.get("meciuri_jucate", 0))
+                summary[1].metric("Puncte", team.get("puncte", 0))
+                summary[2].metric("Trofee", len(trofee_echipa(data, selected_team_name)))
+
+                if can_edit_roster:
+                    with st.form(f"rename_team_form_{league_slug}_{safe_slug(selected_team_name)}"):
+                        renamed_team = st.text_input("Numele echipei", value=selected_team_name)
+                        save_team_name = st.form_submit_button("Salvează numele echipei")
+                    if save_team_name:
+                        try:
+                            rename_team(data, selected_team_name, renamed_team)
                             save_league(path, data)
-                            st.success(f"Statisticile lui {edited_player} au fost actualizate.")
+                            st.session_state[team_state_key] = renamed_team.strip()
                             st.rerun()
-                    with st.form(f"player_position_form_{safe_slug(name)}"):
-                        position_player = st.selectbox("Actualizează poziția", list(team["jucatori"]),
-                            key=f"position_player_{safe_slug(name)}")
+                        except ValueError as exc:
+                            st.error(str(exc))
+
+                st.markdown("#### Lot")
+                if team.get("jucatori"):
+                    player_columns = st.columns(2)
+                    for index, (player_name, stats) in enumerate(team["jucatori"].items()):
+                        column = player_columns[index % 2]
+                        position = stats.get("pozitie") or "Poziție nespecificată"
+                        if column.button(f"{player_name}", key=f"open_player_{league_slug}_{safe_slug(selected_team_name)}_{index}", width="stretch"):
+                            st.session_state[player_state_key] = player_name
+                            st.rerun()
+                        column.caption(f"{position} · {stats.get('goluri', 0)} goluri · {stats.get('asisturi', 0)} assisturi")
+                else:
+                    st.info("Lotul echipei este gol.")
+
+                if can_edit_roster:
+                    st.divider()
+                    st.markdown("#### Adaugă un jucător")
+                    with st.form(f"add_player_form_{league_slug}_{safe_slug(selected_team_name)}"):
+                        new_player_name = st.text_input("Numele jucătorului", key=f"new_player_name_{league_slug}_{safe_slug(selected_team_name)}")
                         player_positions = ["Nespecificată", *POZITII_FOTBAL]
-                        previous_position = team["jucatori"][position_player].get("pozitie", "")
-                        position_index = player_positions.index(previous_position) if previous_position in player_positions else 0
-                        chosen_position = st.selectbox("Poziție nouă", player_positions, index=position_index,
-                            key=f"chosen_position_{safe_slug(name)}")
-                        save_position = st.form_submit_button("Salvează poziția")
-                    if save_position:
-                        team["jucatori"][position_player]["pozitie"] = "" if chosen_position == "Nespecificată" else chosen_position
-                        save_league(path, data); st.success("Poziția a fost actualizată."); st.rerun()
-                    for player_name, stats in team["jucatori"].items():
-                        player_trophies = trofee_jucator(data, name, player_name)
-                        if player_trophies:
-                            st.caption(f"🏅 {player_name}: " + " · ".join(player_trophies))
-                    with st.form(f"sterge_jucator_{name}"):
-                        delete_player = st.selectbox("Șterge jucător", list(team["jucatori"]), key=f"dp_{name}")
-                        delete_player_btn = st.form_submit_button("Șterge din lot")
-                    if delete_player_btn:
-                        del team["jucatori"][delete_player]; save_league(path, data); st.rerun()
-                with st.form(f"rename_team_{name}"):
-                    renamed = st.text_input("Redenumește echipa", value=name, key=f"rename_value_{name}")
-                    rename_button = st.form_submit_button("Salvează numele")
-                if rename_button:
-                    try:
-                        rename_team(data, name, renamed)
-                        save_league(path, data); st.success("Echipa a fost redenumită."); st.rerun()
-                    except ValueError as exc:
-                        st.error(str(exc))
+                        new_player_position = st.selectbox("Poziția", player_positions,
+                            key=f"new_player_position_{league_slug}_{safe_slug(selected_team_name)}")
+                        add_player = st.form_submit_button("Adaugă în lot", type="primary")
+                    if add_player:
+                        cleaned_player_name = new_player_name.strip()
+                        if not cleaned_player_name:
+                            st.error("Introdu numele jucătorului.")
+                        elif cleaned_player_name in team["jucatori"]:
+                            st.error("Jucătorul există deja în lot.")
+                        else:
+                            team["jucatori"][cleaned_player_name] = {**STATS_JUCATOR,
+                                "pozitie": "" if new_player_position == "Nespecificată" else new_player_position}
+                            save_league(path, data)
+                            st.session_state[player_state_key] = cleaned_player_name
+                            st.rerun()
 
     if page == "Meciuri și program":
         match_tabs = st.tabs(["Rezultate", "Program", "Live"])
