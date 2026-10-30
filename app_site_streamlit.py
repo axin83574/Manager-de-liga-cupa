@@ -4534,62 +4534,68 @@ def main():
 
     if page == "Membri":
         st.subheader("Membri și acces la ligă")
+        member_sections = ["Coduri", "Membri"] if role in {"owner", "editor"} else ["Coduri"]
+        members_view = st.radio("Afișează", member_sections, horizontal=True,
+            key=f"members_section_{safe_slug(league_key(selected_entry))}")
         if role != "owner":
-            st.info("Doar proprietarul ligii poate administra accesul membrilor.")
-            st.write(f"Proprietar: **@{owner}** · Rolul tău: **{'Editor' if role == 'editor' else 'Vizitator'}**")
+            if members_view == "Coduri":
+                st.info("Doar proprietarul ligii poate administra codurile de acces.")
+                st.write(f"Proprietar: **@{owner}** · Rolul tău: **{'Editor' if role == 'editor' else 'Vizitator'}**")
         else:
-            previous_codes = data.get("coduri_invitat", {})
-            previous_codes = copy.deepcopy(previous_codes) if isinstance(previous_codes, dict) else {}
-            codes = data["coduri_invitat"] = copy.deepcopy(previous_codes)
-            if not codes.get("spectator"):
-                codes["spectator"] = new_access_code()
-            if not codes.get("editor"):
-                codes["editor"] = new_access_code()
-            if codes != previous_codes:
-                save_league(path, data)
-            st.markdown("#### Coduri de acces pentru această ligă")
-            st.caption("Codurile sunt aceleași pentru toți invitații. Le poți copia o singură dată și le poți schimba oricând.")
-            code_col1, code_col2 = st.columns(2, gap="large")
-            for col, code_type, title, description in (
-                    (code_col1, "spectator", "👁 Cod spectator", "Invitatul alege dacă este jucător sau doar spectator."),
-                    (code_col2, "editor", "✏️ Cod editor", "Invitatul intră direct și poate modifica liga.")):
-                with col:
-                    with st.container(border=True):
-                        st.markdown(f"### {title}")
-                        st.code(codes[code_type], language=None)
-                        st.caption(description)
-                        if st.button("Generează cod nou", key=f"rotate_{code_type}"):
-                            data["coduri_invitat"][code_type] = new_access_code()
-                            save_league(path, data)
-                            st.rerun()
-            st.info("Invitații introduc codul pe ecranul de autentificare. Schimbarea unui cod dezactivează imediat codul vechi.")
+            if members_view == "Coduri":
+                previous_codes = data.get("coduri_invitat", {})
+                previous_codes = copy.deepcopy(previous_codes) if isinstance(previous_codes, dict) else {}
+                codes = data["coduri_invitat"] = copy.deepcopy(previous_codes)
+                if not codes.get("spectator"):
+                    codes["spectator"] = new_access_code()
+                if not codes.get("editor"):
+                    codes["editor"] = new_access_code()
+                if codes != previous_codes:
+                    save_league(path, data)
+                st.markdown("#### Coduri de acces pentru această ligă")
+                st.caption("Codurile sunt aceleași pentru toți invitații. Le poți copia o singură dată și le poți schimba oricând.")
+                code_col1, code_col2 = st.columns(2, gap="large")
+                for col, code_type, title, description in (
+                        (code_col1, "spectator", "👁 Cod spectator", "Invitatul alege dacă este jucător sau doar spectator."),
+                        (code_col2, "editor", "✏️ Cod editor", "Invitatul intră direct și poate modifica liga.")):
+                    with col:
+                        with st.container(border=True):
+                            st.markdown(f"### {title}")
+                            st.code(codes[code_type], language=None)
+                            st.caption(description)
+                            if st.button("Generează cod nou", key=f"rotate_{code_type}"):
+                                data["coduri_invitat"][code_type] = new_access_code()
+                                save_league(path, data)
+                                st.rerun()
+                st.info("Invitații introduc codul pe ecranul de autentificare. Schimbarea unui cod dezactivează imediat codul vechi.")
 
-            st.divider()
-            data.setdefault("membri", [])
-            if data["membri"]:
-                st.markdown("#### Acces acordat")
-                for index, member in enumerate(list(data["membri"])):
-                    member_name = member.get("username", "?")
-                    with st.container(border=True):
-                        m1, m2, m3 = st.columns([2, 2, 1])
-                        m1.markdown(f"**@{member_name}** · {'Jucător' if member.get('tip') == 'jucator' else 'Spectator'}")
-                        new_role = m2.selectbox("Rol", ["editor", "vizitator"],
-                            index=0 if member.get("rol") == "editor" else 1,
-                            format_func=lambda r: "Editor" if r == "editor" else "Vizitator",
-                            key=f"member_role_{index}_{member_name}")
-                        if m2.button("Salvează rolul", key=f"save_role_{index}_{member_name}"):
-                            next(m for m in data["membri"] if m.get("username") == member_name)["rol"] = new_role
-                            save_league(path, data); st.success("Rol actualizat."); st.rerun()
-                        if m3.button("Revocă", key=f"revoke_{index}_{member_name}"):
-                            data["membri"] = [m for m in data["membri"] if m.get("username") != member_name]
-                            save_league(path, data); st.success("Acces revocat."); st.rerun()
-                        linked = load_users().get(member_name, {}).get("selectii_ligi", {}).get(league_key(selected_entry))
-                        if linked:
-                            st.caption(f"Alegerea profilului: {linked.get('echipa')} · {linked.get('jucator')} ({linked.get('pozitie') or 'poziție nespecificată'})")
-            else:
-                st.info("Nu ai partajat această ligă cu niciun cont încă.")
+            if members_view == "Membri":
+                st.divider()
+                data.setdefault("membri", [])
+                if data["membri"]:
+                    st.markdown("#### Acces acordat")
+                    for index, member in enumerate(list(data["membri"])):
+                        member_name = member.get("username", "?")
+                        with st.container(border=True):
+                            m1, m2, m3 = st.columns([2, 2, 1])
+                            m1.markdown(f"**@{member_name}** · {'Jucător' if member.get('tip') == 'jucator' else 'Spectator'}")
+                            new_role = m2.selectbox("Rol", ["editor", "vizitator"],
+                                index=0 if member.get("rol") == "editor" else 1,
+                                format_func=lambda r: "Editor" if r == "editor" else "Vizitator",
+                                key=f"member_role_{index}_{member_name}")
+                            if m2.button("Salvează rolul", key=f"save_role_{index}_{member_name}"):
+                                next(m for m in data["membri"] if m.get("username") == member_name)["rol"] = new_role
+                                save_league(path, data); st.success("Rol actualizat."); st.rerun()
+                            if m3.button("Revocă", key=f"revoke_{index}_{member_name}"):
+                                data["membri"] = [m for m in data["membri"] if m.get("username") != member_name]
+                                save_league(path, data); st.success("Acces revocat."); st.rerun()
+                            linked = load_users().get(member_name, {}).get("selectii_ligi", {}).get(league_key(selected_entry))
+                            if linked:
+                                st.caption(f"Alegerea profilului: {linked.get('echipa')} · {linked.get('jucator')} ({linked.get('pozitie') or 'poziție nespecificată'})")
+                else:
+                    st.info("Nu ai partajat această ligă cu niciun cont încă.")
 
-        if role in {"owner", "editor"}:
+        if members_view == "Membri" and role in {"owner", "editor"}:
             st.divider()
             st.markdown("#### Corectează jucătorul ales de un spectator")
             st.caption("Poți schimba asocierea dacă un spectator a ales din greșeală jucătorul altcuiva.")
