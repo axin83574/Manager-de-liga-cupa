@@ -2423,37 +2423,112 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     can_choose_player = username or (guest_profile and guest_profile.get("kind") == "jucator") or (
         guest_invite and guest_invite.get("access_method") == "legacy"
         and guest_invite["invitation"].get("tip") == "jucator")
-    tabs = st.tabs(["Clasament", "Statistici", "Loturi", "Meciuri și program", "Cupe", "Premii"] +
+    tabs = st.tabs(["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Cupe", "Premii"] +
                    (["Alegerea mea"] if can_choose_player else []))
     t1, t2 = tabs[0], tabs[2]
     with t1:
         st.subheader(data.get("nume_liga", "Liga"))
         render_cards(ranking(data))
     with t2:
-        for team, info in data["echipe"].items():
-            with st.expander(f"{team} · {len(info.get('jucatori', {}))} jucători"):
-                render_cards([{"Jucător": p, "Poziție": s.get("pozitie") or "–",
-                               "Trofee": " · ".join(trofee_jucator(data, team, p)) or "–",
-                               **{k: v for k, v in s.items() if k not in {"pozitie", "_ajustari_statistici"}}}
-                              for p, s in info.get("jucatori", {}).items()])
+        viewer_league_slug = safe_slug(league_key(entry))
+        viewer_team_key = f"viewer_roster_team_{viewer_league_slug}"
+        viewer_player_key = f"viewer_roster_player_{viewer_league_slug}"
+        viewer_team_name = st.session_state.get(viewer_team_key)
+        if viewer_team_name not in data.get("echipe", {}):
+            st.session_state.pop(viewer_team_key, None)
+            st.session_state.pop(viewer_player_key, None)
+            viewer_team_name = None
+        viewer_player_name = st.session_state.get(viewer_player_key)
+        viewer_team = data.get("echipe", {}).get(viewer_team_name, {}) if viewer_team_name else {}
+        if viewer_player_name not in viewer_team.get("jucatori", {}):
+            st.session_state.pop(viewer_player_key, None)
+            viewer_player_name = None
+
+        if not viewer_team_name:
+            st.subheader("Echipe")
+            if data.get("echipe"):
+                team_names = list(data["echipe"])
+                team_columns = st.columns(2)
+                for index, team_name in enumerate(team_names):
+                    team_info = data["echipe"][team_name]
+                    column = team_columns[index % 2]
+                    if column.button(f"⚽ {team_name}", key=f"viewer_open_team_{viewer_league_slug}_{index}",
+                                     width="stretch"):
+                        st.session_state[viewer_team_key] = team_name
+                        st.session_state.pop(viewer_player_key, None)
+                        st.rerun()
+                    column.caption(f"{len(team_info.get('jucatori', {}))} jucători · {team_info.get('puncte', 0)} puncte")
+            else:
+                st.info("Nu există echipe în ligă încă.")
+        elif viewer_player_name:
+            if st.button("← Înapoi la lot", key=f"viewer_back_roster_{viewer_league_slug}"):
+                st.session_state.pop(viewer_player_key, None)
+                st.rerun()
+            player_info = viewer_team["jucatori"][viewer_player_name]
+            st.markdown(f"### {viewer_player_name}")
+            st.caption(f"Echipă: {viewer_team_name} · Poziție: {player_info.get('pozitie') or 'Nespecificată'}")
+            trophies = trofee_jucator(data, viewer_team_name, viewer_player_name)
+            if trophies:
+                st.caption("Trofee: " + " · ".join(trophies))
+            player_stats_columns = st.columns(4)
+            for column, label, stat_key in zip(player_stats_columns,
+                    ("Goluri", "Assisturi", "Cartonașe galbene", "Cartonașe roșii"),
+                    ("goluri", "asisturi", "cartonase_galbene", "cartonase_rosii")):
+                column.metric(label, player_info.get(stat_key, 0))
+        else:
+            if st.button("← Înapoi la echipe", key=f"viewer_back_teams_{viewer_league_slug}"):
+                st.session_state.pop(viewer_team_key, None)
+                st.rerun()
+            st.markdown(f"### ⚽ {viewer_team_name}")
+            team_info = viewer_team
+            team_columns = st.columns(3)
+            team_columns[0].metric("Meciuri", team_info.get("meciuri_jucate", 0))
+            team_columns[1].metric("Puncte", team_info.get("puncte", 0))
+            team_columns[2].metric("Trofee", len(trofee_echipa(data, viewer_team_name)))
+            st.markdown("#### Lot")
+            player_items = list(team_info.get("jucatori", {}).items())
+            if player_items:
+                player_columns = st.columns(2)
+                for index, (player_name, player_info) in enumerate(player_items):
+                    column = player_columns[index % 2]
+                    if column.button(player_name, key=f"viewer_open_player_{viewer_league_slug}_{index}",
+                                     width="stretch"):
+                        st.session_state[viewer_player_key] = player_name
+                        st.rerun()
+                    column.caption(f"{player_info.get('pozitie') or 'Poziție nespecificată'} · "
+                                   f"{player_info.get('goluri', 0)} goluri · {player_info.get('asisturi', 0)} assisturi")
+            else:
+                st.info("Lotul echipei este gol.")
     with tabs[3]:
         match_tabs = st.tabs(["Rezultate", "Program", "Live", "Arbitraj"])
         with match_tabs[0]:
             ordered_matches = ordered_by_stage(data.get("istoric_meciuri", []))
             if ordered_matches:
-                with st.container(key="spectator_match_picker"):
-                    selected_match = st.radio(
-                        "Alege un meci",
-                        ordered_matches,
-                        format_func=lambda m: f"Etapa {m.get('etapa') or '—'} · {m.get('e1')} {m.get('goluri_e1', 0)}–{m.get('goluri_e2', 0)} {m.get('e2')}",
-                        key=f"viewer_history_match_{safe_slug(league_key(entry))}")
-                with st.container(border=True):
-                    render_match_history_details(selected_match)
-                    st.divider()
-                    st.markdown("##### ⭐ Votează omul meciului")
-                    render_motm_voting(data, selected_match, entry["path"], username, profile, guest_invite,
-                        widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}",
-                        touch_friendly=True)
+                history_key = f"viewer_history_detail_{safe_slug(league_key(entry))}"
+                selected_match_id = st.session_state.get(history_key)
+                selected_match = next((match for match in ordered_matches
+                    if str(match.get("id")) == str(selected_match_id)), None)
+                if selected_match is None:
+                    st.session_state.pop(history_key, None)
+                    st.subheader("Rezultate")
+                    for index, match in enumerate(ordered_matches):
+                        label = (f"Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
+                                 f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}")
+                        if st.button(label, key=f"viewer_open_match_{safe_slug(league_key(entry))}_{index}",
+                                     width="stretch"):
+                            st.session_state[history_key] = str(match.get("id"))
+                            st.rerun()
+                else:
+                    if st.button("← Înapoi la rezultate", key=f"viewer_back_match_{safe_slug(league_key(entry))}"):
+                        st.session_state.pop(history_key, None)
+                        st.rerun()
+                    with st.container(border=True):
+                        render_match_history_details(selected_match)
+                        st.divider()
+                        st.markdown("##### ⭐ Votează omul meciului")
+                        render_motm_voting(data, selected_match, entry["path"], username, profile, guest_invite,
+                            widget_key=f"viewer-{league_key(entry)}-{selected_match.get('id')}",
+                            touch_friendly=True)
             else:
                 st.info("Nu există încă meciuri înregistrate în această ligă.")
         with match_tabs[1]:
@@ -3931,95 +4006,99 @@ def main():
             if data["istoric_meciuri"]:
                 st.subheader("Rezultate")
                 ordered_matches = ordered_by_stage(data["istoric_meciuri"])
-                render_cards([{"Etapa": m.get("etapa") or "–", "Gazdă": m["e1"],
-                               "Scor": f"{m['goluri_e1']} – {m['goluri_e2']}", "Oaspeți": m["e2"],
-                               "Schimbări": match_substitution_summary(m),
-                               "Masa verde": "Da" if m.get("masa_verde") else ""}
-                              for m in ordered_matches])
-                st.markdown("#### Istoric meci și vot pentru omul meciului")
-                selected_history_match = st.selectbox(
-                    "Alege un meci",
-                    ordered_matches,
-                    format_func=lambda m: f"Etapa {m.get('etapa') or '—'} · {m.get('e1')} {m.get('goluri_e1', 0)}–{m.get('goluri_e2', 0)} {m.get('e2')}",
-                    key=f"history_match_{safe_slug(league_key(selected_entry))}")
-                if selected_history_match:
+                history_key = f"history_detail_{safe_slug(league_key(selected_entry))}"
+                selected_match_id = st.session_state.get(history_key)
+                selected_history_match = next((match for match in ordered_matches
+                    if str(match.get("id")) == str(selected_match_id)), None)
+                if selected_history_match is None:
+                    st.session_state.pop(history_key, None)
+                    for index, match in enumerate(ordered_matches):
+                        label = (f"Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
+                                 f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}")
+                        if st.button(label, key=f"open_history_match_{safe_slug(league_key(selected_entry))}_{index}",
+                                     width="stretch"):
+                            st.session_state[history_key] = str(match.get("id"))
+                            st.rerun()
+                else:
+                    if st.button("← Înapoi la rezultate", key=f"back_history_match_{safe_slug(league_key(selected_entry))}"):
+                        st.session_state.pop(history_key, None)
+                        st.rerun()
                     with st.container(border=True):
                         render_match_history_details(selected_history_match)
                         st.divider()
                         st.markdown("##### ⭐ Votează omul meciului")
                         render_motm_voting(data, selected_history_match, path, username, profile,
                             widget_key=f"league-{league_key(selected_entry)}-{selected_history_match.get('id')}")
-                with st.expander("Editează un rezultat"):
-                    match_to_edit = st.selectbox("Meci de editat", data["istoric_meciuri"],
-                        format_func=lambda m: f"{m.get('etapa') or '–'} · {m['e1']} {m['goluri_e1']}–{m['goluri_e2']} {m['e2']}",
-                        key="match_to_edit")
-                    teams_for_edit = list(data["echipe"])
-                    original_events = match_to_edit.get("evenimente", [])
-                    with st.form("edit_match_form"):
-                        ec1, ec2 = st.columns(2)
-                        edited_home = ec1.selectbox("Gazdă", teams_for_edit,
-                            index=teams_for_edit.index(match_to_edit["e1"]) if match_to_edit["e1"] in teams_for_edit else 0)
-                        edited_away = ec2.selectbox("Oaspeți", teams_for_edit,
-                            index=teams_for_edit.index(match_to_edit["e2"]) if match_to_edit["e2"] in teams_for_edit else min(1, len(teams_for_edit)-1))
-                        edited_round = st.number_input("Etapa", min_value=0,
-                            value=int(match_to_edit.get("etapa") or 0), step=1)
-                        save_edit = st.form_submit_button("Salvează modificările")
-                    edited_events = render_match_event_entry(data, edited_home, edited_away,
-                        f"edit_{match_to_edit['id']}", initial_events=original_events)
-                    if save_edit:
-                        if edited_home == edited_away:
-                            st.error("Alege două echipe diferite.")
-                        else:
-                            new_events, invalid = [], False
-                            for row in edited_events:
-                                player_name = str(row.get("jucator", "")).strip()
-                                if not player_name:
-                                    continue
-                                if row.get("echipa") not in (edited_home, edited_away):
-                                    st.error("Evenimentul trebuie să aparțină uneia dintre echipe."); invalid = True; break
-                                if row.get("tip") == "Schimbare":
-                                    incoming_player = str(row.get("intra", "")).strip()
-                                    if not incoming_player or incoming_player.casefold() == player_name.casefold():
-                                        st.error("Alege doi jucători diferiți pentru schimbare."); invalid = True; break
+                    match_to_edit = selected_history_match
+                    with st.expander("Editează un rezultat"):
+                        teams_for_edit = list(data["echipe"])
+                        original_events = match_to_edit.get("evenimente", [])
+                        with st.form("edit_match_form"):
+                            ec1, ec2 = st.columns(2)
+                            edited_home = ec1.selectbox("Gazdă", teams_for_edit,
+                                index=teams_for_edit.index(match_to_edit["e1"]) if match_to_edit["e1"] in teams_for_edit else 0)
+                            edited_away = ec2.selectbox("Oaspeți", teams_for_edit,
+                                index=teams_for_edit.index(match_to_edit["e2"]) if match_to_edit["e2"] in teams_for_edit else min(1, len(teams_for_edit)-1))
+                            edited_round = st.number_input("Etapa", min_value=0,
+                                value=int(match_to_edit.get("etapa") or 0), step=1)
+                            save_edit = st.form_submit_button("Salvează modificările")
+                        edited_events = render_match_event_entry(data, edited_home, edited_away,
+                            f"edit_{match_to_edit['id']}", initial_events=original_events)
+                        if save_edit:
+                            if edited_home == edited_away:
+                                st.error("Alege două echipe diferite.")
+                            else:
+                                new_events, invalid = [], False
+                                for row in edited_events:
+                                    player_name = str(row.get("jucator", "")).strip()
+                                    if not player_name:
+                                        continue
+                                    if row.get("echipa") not in (edited_home, edited_away):
+                                        st.error("Evenimentul trebuie să aparțină uneia dintre echipe."); invalid = True; break
+                                    if row.get("tip") == "Schimbare":
+                                        incoming_player = str(row.get("intra", "")).strip()
+                                        if not incoming_player or incoming_player.casefold() == player_name.casefold():
+                                            st.error("Alege doi jucători diferiți pentru schimbare."); invalid = True; break
+                                        new_events.append({"echipa": row["echipa"],
+                                            "minut": int(row.get("minut", 1)), "tip": "Schimbare",
+                                            "jucator": player_name, "intra": incoming_player})
+                                        continue
+                                    assist_name = row.get("asist") or None
+                                    if assist_name == player_name:
+                                        st.error("Marcatorul nu poate să-și dea assist lui însuși."); invalid = True; break
                                     new_events.append({"echipa": row["echipa"],
-                                        "minut": int(row.get("minut", 1)), "tip": "Schimbare",
-                                        "jucator": player_name, "intra": incoming_player})
-                                    continue
-                                assist_name = row.get("asist") or None
-                                if assist_name == player_name:
-                                    st.error("Marcatorul nu poate să-și dea assist lui însuși."); invalid = True; break
-                                new_events.append({"echipa": row["echipa"],
-                                    "minut": int(row.get("minut", 1)),
-                                    "tip": row.get("tip", TIPURI_EVENIMENT[0]),
-                                    "jucator": player_name, "asist": assist_name})
-                            if not invalid:
-                                old_index = data["istoric_meciuri"].index(match_to_edit)
-                                old_id = match_to_edit["id"]
-                                data["istoric_meciuri"].pop(old_index)
-                                rebuild_stats(data)
-                                corrected = build_match(edited_home, edited_away, new_events,
-                                    int(edited_round) or None, walkover=match_to_edit.get("masa_verde"),
-                                    reason=match_to_edit.get("motiv_mv", ""))
-                                corrected["id"] = old_id
-                                if "voturi_motm" in match_to_edit:
-                                    corrected["voturi_motm"] = match_to_edit["voturi_motm"]
-                                apply_match(data, corrected)
-                                data["istoric_meciuri"].insert(old_index, data["istoric_meciuri"].pop())
-                                for fixture in data["program"]:
-                                    if fixture.get("meci_id") == old_id:
-                                        fixture["e1"], fixture["e2"] = corrected["e1"], corrected["e2"]
-                                        fixture["etapa"] = corrected.get("etapa")
-                                save_league(path, data); st.success("Rezultatul a fost corectat."); st.rerun()
-                with st.expander("Anulează un rezultat"):
-                    selected = st.selectbox("Meci", data["istoric_meciuri"],
-                        format_func=lambda m: f"{m.get('etapa') or '–'} · {m['e1']} {m['goluri_e1']}–{m['goluri_e2']} {m['e2']}")
-                    if st.button("Anulează meciul selectat", type="secondary"):
-                        data["istoric_meciuri"].remove(selected)
-                        for fixture in data["program"]:
-                            if fixture.get("meci_id") == selected.get("id"):
-                                fixture["meci_id"] = None
-                        rebuild_stats(data)
-                        save_league(path, data); st.rerun()
+                                        "minut": int(row.get("minut", 1)),
+                                        "tip": row.get("tip", TIPURI_EVENIMENT[0]),
+                                        "jucator": player_name, "asist": assist_name})
+                                if not invalid:
+                                    old_index = data["istoric_meciuri"].index(match_to_edit)
+                                    old_id = match_to_edit["id"]
+                                    data["istoric_meciuri"].pop(old_index)
+                                    rebuild_stats(data)
+                                    corrected = build_match(edited_home, edited_away, new_events,
+                                        int(edited_round) or None, walkover=match_to_edit.get("masa_verde"),
+                                        reason=match_to_edit.get("motiv_mv", ""))
+                                    corrected["id"] = old_id
+                                    if "voturi_motm" in match_to_edit:
+                                        corrected["voturi_motm"] = match_to_edit["voturi_motm"]
+                                    apply_match(data, corrected)
+                                    data["istoric_meciuri"].insert(old_index, data["istoric_meciuri"].pop())
+                                    for fixture in data["program"]:
+                                        if fixture.get("meci_id") == old_id:
+                                            fixture["e1"], fixture["e2"] = corrected["e1"], corrected["e2"]
+                                            fixture["etapa"] = corrected.get("etapa")
+                                    save_league(path, data); st.success("Rezultatul a fost corectat."); st.rerun()
+                    with st.expander("Anulează un rezultat"):
+                        selected = selected_history_match
+                        if st.button("Anulează meciul selectat", type="secondary"):
+                            data["istoric_meciuri"].remove(selected)
+                            for fixture in data["program"]:
+                                if fixture.get("meci_id") == selected.get("id"):
+                                    fixture["meci_id"] = None
+                            rebuild_stats(data)
+                            save_league(path, data); st.rerun()
+            else:
+                st.info("Nu există încă rezultate înregistrate în această ligă.")
         with match_tabs[1]:
             st.subheader("Înregistrează un meci")
             teams = list(data["echipe"])
