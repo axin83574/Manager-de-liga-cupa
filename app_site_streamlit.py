@@ -4622,21 +4622,29 @@ def main():
                         previous_selection = linked
                     previous_kind = "Jucător" if previous_selection.get("jucator") else "Spectator"
                     with st.expander(f"{target['name']} · {previous_kind}", expanded=False):
-                        with st.form(f"member_player_assignment_{safe_slug(target_id)}"):
-                            choice_type = st.radio("Tipul profilului", ["Jucător", "Spectator"],
-                                index=0 if previous_kind == "Jucător" else 1,
-                                horizontal=True, key=f"member_choice_type_{safe_slug(target_id)}")
+                        target_slug = safe_slug(target_id)
+                        choice_type = st.radio("Tipul profilului", ["Jucător", "Spectator"],
+                            index=0 if previous_kind == "Jucător" else 1,
+                            horizontal=True, key=f"member_choice_type_v2_{target_slug}")
+                        chosen_team = None
+                        chosen_player = None
+                        if choice_type == "Jucător":
                             team_index = (teams_for_assignment.index(previous_selection["echipa"])
                                 if previous_selection.get("echipa") in teams_for_assignment else 0)
                             chosen_team = st.selectbox("Echipa", teams_for_assignment,
-                                index=team_index, key=f"member_choice_team_{safe_slug(target_id)}")
+                                index=team_index, key=f"member_choice_team_v2_{target_slug}",
+                                on_change=lambda player_key=f"member_choice_player_v2_{target_slug}":
+                                    st.session_state.pop(player_key, None))
                             player_options = list(data["echipe"][chosen_team].get("jucatori", {}))
                             prior_player = previous_selection.get("jucator")
                             player_index = player_options.index(prior_player) if prior_player in player_options else 0
                             chosen_player = st.selectbox("Jucător", player_options,
                                 index=player_index, disabled=not player_options,
-                                key=f"member_choice_player_{safe_slug(target_id)}")
-                            save_assignment = st.form_submit_button("Salvează alegerea", type="primary")
+                                key=f"member_choice_player_v2_{target_slug}")
+                        else:
+                            st.caption("Apare în ligă ca spectator și nu are asociat un jucător.")
+                        save_assignment = st.button("Salvează alegerea", type="primary",
+                            key=f"member_player_assignment_v2_{target_slug}")
                         if save_assignment:
                             selections = data.setdefault("selectii_membri", {})
                             if choice_type == "Jucător" and chosen_player:
