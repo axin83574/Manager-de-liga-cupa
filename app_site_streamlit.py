@@ -904,12 +904,7 @@ def render_match_history_details(match):
     starting_lineups = match.get("echipe_start", {})
     if starting_lineups:
         st.markdown("**Echipe de start**")
-        lineup_columns = st.columns(2)
-        for column, team_name in zip(lineup_columns, (match.get("e1"), match.get("e2"))):
-            lineup = starting_lineups.get(team_name, {})
-            if lineup:
-                column.markdown(f"**{team_name} · {lineup.get('formatie', '—')}**")
-                column.write(" · ".join(lineup.get("jucatori", [])))
+        _render_formation_pitch(starting_lineups, match.get("e1"), match.get("e2"))
     events = sorted(match.get("evenimente", []),
                     key=lambda event: int(event.get("minut", 0) or 0))
     if events:
@@ -1895,6 +1890,100 @@ def _live_set_running(live, running):
         live["pornit_la"] = None
 
 
+def _formation_groups(formation):
+    try:
+        counts = [int(part) for part in str(formation).split("-")]
+    except ValueError:
+        counts = []
+    if len(counts) == 3:
+        return [("Fundaș", counts[0]), ("Mijlocaș", counts[1]), ("Atacant", counts[2])]
+    if len(counts) == 2:
+        return [("Fundaș", counts[0]), ("Atacant", counts[1])]
+    if len(counts) == 1:
+        return [("Atacant", counts[0])]
+    return []
+
+
+def _formation_position_labels(formation):
+    labels = ["Portar"]
+    for group, count in _formation_groups(formation):
+        labels.extend(f"{group} {index}" for index in range(1, count + 1))
+    return labels
+
+
+def _render_formation_pitch(lineups, home, away):
+    if not lineups:
+        return
+
+    def player_marker(position, player, color):
+        shown_name = html.escape(str(player)) if player else "—"
+        shown_position = html.escape(str(position))
+        return (f'<div class="pitch-player"><span class="pitch-shirt {color}">●</span>'
+                f'<span class="pitch-player-name">{shown_name}</span>'
+                f'<span class="pitch-position">{shown_position}</span></div>')
+
+    def render_team_half(team_name, color, order):
+        lineup = lineups.get(team_name, {})
+        formation = str(lineup.get("formatie", ""))
+        positions = lineup.get("pozitii") or dict(zip(
+            _formation_position_labels(formation), lineup.get("jucatori", [])))
+        groups = _formation_groups(formation)
+        group_labels = [group for group, _ in groups]
+        rows = []
+        for group in order:
+            names = [name for name in positions if name == group or name.startswith(group + " ")]
+            if group == "Portar":
+                names = ["Portar"] if "Portar" in positions else []
+            if not names:
+                continue
+            markers = "".join(player_marker(position, positions.get(position), color) for position in names)
+            rows.append(f'<div class="pitch-row">{markers}</div>')
+        team = html.escape(str(team_name))
+        return (f'<section class="pitch-half"><div class="pitch-team-label">{team} · '
+                f'{html.escape(formation)}</div>{"".join(rows)}</section>')
+
+    away_groups = ["Atacant", "Mijlocaș", "Fundaș", "Portar"]
+    home_groups = ["Portar", "Fundaș", "Mijlocaș", "Atacant"]
+    away_half = render_team_half(away, "away-shirt", away_groups)
+    home_half = render_team_half(home, "home-shirt", home_groups)
+    st.markdown("""
+    <style>
+    .lineup-pitch { position:relative; margin:1rem auto; max-width:760px; padding:1.1rem;
+        border:2px solid rgba(255,255,255,.8); border-radius:18px;
+        background:repeating-linear-gradient(0deg,#267a4c 0px,#267a4c 72px,#2d8554 72px,#2d8554 144px);
+        box-shadow:inset 0 0 0 1px rgba(10,40,20,.2); color:#fff; overflow:hidden; }
+    .lineup-pitch:after { content:""; position:absolute; z-index:0; left:50%; top:50%;
+        width:94px; height:94px; transform:translate(-50%,-50%); border:2px solid rgba(255,255,255,.76);
+        border-radius:50%; pointer-events:none; }
+    .pitch-half { min-height:245px; display:flex; flex-direction:column; justify-content:space-around; padding:.25rem 0; }
+    .pitch-half + .pitch-half { border-top:2px solid rgba(255,255,255,.78); }
+    .pitch-team-label { text-align:center; font-weight:800; text-shadow:0 1px 4px #123; padding:.15rem; }
+    .pitch-row { display:flex; align-items:center; justify-content:space-evenly; gap:.4rem; width:100%; }
+    .pitch-player { display:flex; flex:1 1 0; min-width:0; flex-direction:column; align-items:center;
+        text-align:center; line-height:1.15; text-shadow:0 1px 4px #123; }
+    .pitch-shirt { width:31px; height:31px; display:grid; place-items:center; border-radius:50%;
+        color:#fff; font-size:29px; line-height:1; text-shadow:0 1px 3px #123; }
+    .home-shirt { color:#45a4ff; } .away-shirt { color:#ff6262; }
+    .pitch-player-name { max-width:100%; overflow-wrap:anywhere; font-weight:700; font-size:.78rem; }
+    .pitch-position { opacity:.88; font-size:.66rem; }
+    .pitch-team-label,.pitch-row { position:relative; z-index:1; }
+    @media(max-width:640px) { .lineup-pitch { padding:.5rem; } .pitch-half { min-height:205px; }
+      .pitch-shirt { font-size:25px; width:26px; height:26px; } .pitch-player-name { font-size:.67rem; } }
+    </style>
+    """, unsafe_allow_html=True)
+    st.markdown(f'<div class="lineup-pitch">{away_half}{home_half}</div>', unsafe_allow_html=True)
+
+
+def _starting_lineup_inputs(team_name, roster, formation, widget_prefix):
+    positions = {}
+    for position in _formation_position_labels(formation):
+        selected = st.selectbox(position, [None, *roster], index=0,
+            format_func=lambda name: "Alege jucător" if name is None else name,
+            key=f"{widget_prefix}_{safe_slug(team_name)}_{safe_slug(formation)}_{safe_slug(position)}")
+        positions[position] = selected
+    return positions
+
+
 @st.fragment(run_every=2)
 def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     data = load_league(path)
@@ -1943,12 +2032,7 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
     starting_lineups = live.get("echipe_start", {})
     if starting_lineups:
         st.markdown("#### Echipe de start")
-        lineup_columns = st.columns(2)
-        for column, team_name in zip(lineup_columns, (home, away)):
-            lineup = starting_lineups.get(team_name, {})
-            if lineup:
-                column.markdown(f"**{team_name} · {lineup.get('formatie', '—')}**")
-                column.write(" · ".join(lineup.get("jucatori", [])))
+        _render_formation_pitch(starting_lineups, home, away)
     if can_edit:
         key = safe_slug(str(fixture_id))
         phase = live.get("faza", "programat")
@@ -1960,36 +2044,52 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
             formations = FORMATIONS_BY_PLAYER_COUNT.get(configured_players_on_field, ("4-3-3",))
             can_fill_lineup = (len(home_roster) >= configured_players_on_field
                                and len(away_roster) >= configured_players_on_field)
-            with st.form(f"referee_setup_{key}"):
-                st.markdown("#### Formație și echipa de start")
-                lineup_home, lineup_away = st.columns(2)
-                with lineup_home:
-                    home_formation = st.selectbox(f"Formația · {home}", formations,
-                        key=f"ref_formation_home_{key}")
-                    home_starting_players = st.multiselect(f"Echipa de start · {home}", home_roster,
-                        max_selections=configured_players_on_field, key=f"ref_start_home_{key}")
-                with lineup_away:
-                    away_formation = st.selectbox(f"Formația · {away}", formations,
-                        key=f"ref_formation_away_{key}")
-                    away_starting_players = st.multiselect(f"Echipa de start · {away}", away_roster,
-                        max_selections=configured_players_on_field, key=f"ref_start_away_{key}")
-                skip_lineup = False
-                if not can_fill_lineup:
-                    st.warning("Unul dintre loturi nu are destui jucători pentru numărul setat pe teren.")
-                    skip_lineup = st.checkbox("Pornește fără să înregistrezi echipele de start",
-                        key=f"ref_skip_lineup_{key}")
-                start_match = st.form_submit_button("Pornește prima repriză", type="primary")
+            st.markdown("#### Formație și echipa de start")
+            lineup_home, lineup_away = st.columns(2)
+            with lineup_home:
+                st.markdown(f"**{home}**")
+                home_formation = st.selectbox("Formație", formations,
+                    key=f"ref_formation_home_{key}")
+                home_positions = _starting_lineup_inputs(home, home_roster, home_formation,
+                    f"ref_start_home_{key}")
+            with lineup_away:
+                st.markdown(f"**{away}**")
+                away_formation = st.selectbox("Formație", formations,
+                    key=f"ref_formation_away_{key}")
+                away_positions = _starting_lineup_inputs(away, away_roster, away_formation,
+                    f"ref_start_away_{key}")
+            preview_lineups = {
+                home: {"formatie": home_formation, "pozitii": home_positions},
+                away: {"formatie": away_formation, "pozitii": away_positions},
+            }
+            st.markdown("#### Așezarea pe teren")
+            _render_formation_pitch(preview_lineups, home, away)
+            skip_lineup = False
+            if not can_fill_lineup:
+                st.warning("Unul dintre loturi nu are destui jucători pentru numărul setat pe teren.")
+                skip_lineup = st.checkbox("Pornește fără să înregistrezi echipele de start",
+                    key=f"ref_skip_lineup_{key}")
+            start_match = st.button("Pornește prima repriză", type="primary", key=f"referee_setup_{key}")
             if start_match:
-                if not skip_lineup and (len(home_starting_players) != configured_players_on_field
-                        or len(away_starting_players) != configured_players_on_field):
-                    st.error(f"Alege exact {configured_players_on_field} jucători pentru fiecare echipă de start.")
+                home_players = list(home_positions.values())
+                away_players = list(away_positions.values())
+                lineup_is_complete = (
+                    len(home_players) == configured_players_on_field
+                    and len(away_players) == configured_players_on_field
+                    and all(home_players) and all(away_players)
+                    and len(set(home_players)) == len(home_players)
+                    and len(set(away_players)) == len(away_players))
+                if not skip_lineup and not lineup_is_complete:
+                    st.error(f"Alege un jucător diferit pentru fiecare poziție: {configured_players_on_field} titulari pentru fiecare echipă.")
                 else:
                     if skip_lineup:
                         live.pop("echipe_start", None)
                     else:
                         live["echipe_start"] = {
-                            home: {"formatie": home_formation, "jucatori": list(home_starting_players)},
-                            away: {"formatie": away_formation, "jucatori": list(away_starting_players)},
+                            home: {"formatie": home_formation, "jucatori": home_players,
+                                   "pozitii": home_positions},
+                            away: {"formatie": away_formation, "jucatori": away_players,
+                                   "pozitii": away_positions},
                         }
                     live["half_minutes"] = configured_half_minutes
                     live["jucatori_pe_teren"] = configured_players_on_field
@@ -2256,12 +2356,7 @@ def render_live_matches_overview(path):
                        f"{live.get('half_minutes', data.get('setari_liga', {}).get('durata_repriza', 45))} minute/repriză")
             starting_lineups = live.get("echipe_start", {})
             if starting_lineups:
-                lineup_columns = st.columns(2)
-                for column, team_name in zip(lineup_columns, (fixture.get("e1"), fixture.get("e2"))):
-                    lineup = starting_lineups.get(team_name, {})
-                    if lineup:
-                        column.markdown(f"**{team_name} · {lineup.get('formatie', '—')}**")
-                        column.write(" · ".join(lineup.get("jucatori", [])))
+                _render_formation_pitch(starting_lineups, fixture.get("e1"), fixture.get("e2"))
             for event in reversed(live.get("evenimente", [])[-5:]):
                 minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
                 description = f"{minute} · {event.get('tip')} · {event.get('jucator')} ({event.get('echipa')})"
