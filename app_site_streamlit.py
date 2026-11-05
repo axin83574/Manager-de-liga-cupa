@@ -1804,6 +1804,39 @@ def save_referee_state(path, fixture_id, access_code, live, finish=False):
     _store_league(path, fresh)
 
 
+def delete_referee_result(path, fixture_id, access_code):
+    """Remove the saved league result for a fixture after validating its referee code."""
+    code = str(access_code or "").strip().upper()
+    if len(code) != 8:
+        raise ValueError("Codul de arbitraj nu este valid.")
+    fresh = load_league(path)
+    fixture = _fixture_for_id(fresh, fixture_id)
+    saved_code = str(fixture.get("arbitraj_cod", "")) if fixture else ""
+    if not fixture or not saved_code or not hmac.compare_digest(saved_code, code):
+        raise ValueError("Codul nu mai este valabil pentru acest meci.")
+    match_id = fixture.get("meci_id")
+    if not match_id:
+        raise ValueError("Meciul nu are un rezultat înregistrat.")
+    recorded = next((match for match in fresh.get("istoric_meciuri", [])
+                     if str(match.get("id")) == str(match_id)), None)
+    if recorded:
+        fresh["istoric_meciuri"].remove(recorded)
+        rebuild_stats(fresh)
+    fixture["meci_id"] = None
+    live = fixture.setdefault("arbitraj_live", {})
+    lineup = copy.deepcopy(live.get("echipe_start", {}))
+    live.update({"faza": "programat", "half_minutes": int(fresh.get("setari_liga", {}).get("durata_repriza", 45)),
+        "jucatori_pe_teren": int(fresh.get("setari_liga", {}).get("jucatori_pe_teren", 11)),
+        "secunde": 0, "minute_extra": 0, "minute_extra_total": 0,
+        "pornit_la": None, "evenimente": []})
+    if lineup:
+        live["echipe_start"] = lineup
+    else:
+        live.pop("echipe_start", None)
+    fixture["arbitraj_live"] = live
+    _store_league(path, fresh)
+
+
 def _live_match_score(data, fixture, live):
     if fixture.get("meci_id") and live.get("faza") == "final":
         recorded = next((item for item in data.get("istoric_meciuri", [])
@@ -2481,6 +2514,25 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
             st.markdown(detail)
     else:
         st.caption("Evenimentele vor apărea aici în timp real.")
+    if can_edit and live.get("faza") == "final" and fixture.get("meci_id"):
+        confirm_key = f"ref_delete_result_confirm_{safe_slug(str(fixture_id))}"
+        if st.button("Șterge rezultatul și reia arbitrajul", key=f"ref_delete_result_{safe_slug(str(fixture_id))}"):
+            st.session_state[confirm_key] = True
+        if st.session_state.get(confirm_key):
+            st.warning("Rezultatul va fi scos din istoric și statisticile ligii vor fi recalculate. Meciul va reveni în program.")
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button("Confirmă ștergerea", type="primary",
+                                  key=f"ref_confirm_delete_result_{safe_slug(str(fixture_id))}"):
+                try:
+                    delete_referee_result(path, fixture_id, referee_code)
+                    st.session_state.pop(confirm_key, None)
+                    st.success("Rezultatul a fost șters. Poți arbitra din nou meciul.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+            if cancel_col.button("Păstrează rezultatul", key=f"ref_cancel_delete_result_{safe_slug(str(fixture_id))}"):
+                st.session_state.pop(confirm_key, None)
+                st.rerun()
 
 
 def render_viewer_arbitration(path, league_key_value):
