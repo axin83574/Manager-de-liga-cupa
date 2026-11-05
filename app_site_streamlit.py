@@ -2504,14 +2504,21 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                     st.rerun()
     if live.get("evenimente"):
         st.markdown("#### Evenimente live")
-        for event in reversed(live["evenimente"]):
+        for event_index, event in reversed(list(enumerate(live["evenimente"]))):
             minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
             detail = f"**{minute}** · {event.get('echipa')} · {event.get('tip')} · {event.get('jucator')}"
             if event.get("tip") == "Schimbare":
                 detail += f" → {event.get('intra', '—')}"
             if event.get("asist"):
                 detail += f" · assist {event['asist']}"
-            st.markdown(detail)
+            event_col, action_col = st.columns([8, 1])
+            event_col.markdown(detail)
+            if can_edit and live.get("faza") != "final" and action_col.button(
+                    "Șterge", key=f"ref_delete_event_{key}_{event_index}", help="Șterge evenimentul introdus greșit"):
+                live["evenimente"].pop(event_index)
+                fixture["arbitraj_live"] = live
+                save_referee_state(path, fixture_id, referee_code, live)
+                st.rerun()
     else:
         st.caption("Evenimentele vor apărea aici în timp real.")
     if can_edit and live.get("faza") == "final" and fixture.get("meci_id"):
