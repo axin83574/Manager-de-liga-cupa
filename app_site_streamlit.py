@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import datetime as dt
 import hashlib
 import hmac
@@ -2227,6 +2228,89 @@ def save_manager_player(path, username, player_name, position):
     _store_league(path, fresh)
 
 
+def _team_logo_data_uri(uploaded_file):
+    if uploaded_file is None:
+        return None
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("Fișierul logo este gol.")
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("Logo-ul trebuie să aibă cel mult 2 MB.")
+    signatures = (
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"\xff\xd8\xff", "image/jpeg"),
+    )
+    mime = next((kind for signature, kind in signatures if raw.startswith(signature)), None)
+    if mime is None and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        mime = "image/webp"
+    if mime is None:
+        raise ValueError("Folosește o imagine PNG, JPG sau WEBP validă.")
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _team_logo_bytes(team):
+    value = team.get("logo") if isinstance(team, dict) else None
+    if not isinstance(value, str) or "," not in value:
+        return None
+    mime, encoded = value.split(",", 1)
+    if mime not in {"data:image/png;base64", "data:image/jpeg;base64", "data:image/webp;base64"}:
+        return None
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error):
+        return None
+    return raw if 0 < len(raw) <= 2 * 1024 * 1024 else None
+
+
+def save_team_logo(path, username, team_name, uploaded_file=None, remove=False):
+    fresh = load_league(path)
+    team = fresh.get("echipe", {}).get(team_name)
+    if team is None:
+        raise ValueError("Echipa nu mai există în ligă.")
+    role = st.session_state.get("active_league_role")
+    if role == "manager":
+        member = _team_manager_member(fresh, username)
+        if not member or member.get("echipa_manager") != team_name:
+            raise ValueError("Poți schimba logo-ul doar pentru echipa ta.")
+    elif role not in {"owner", "editor"}:
+        raise ValueError("Nu ai permisiunea să modifici logo-ul echipei.")
+    if remove:
+        team.pop("logo", None)
+    else:
+        team["logo"] = _team_logo_data_uri(uploaded_file)
+    _store_league(path, fresh)
+
+
+def render_team_logo(team, width=64):
+    raw = _team_logo_bytes(team)
+    if raw:
+        st.image(BytesIO(raw), width=width)
+
+
+def render_team_logo_editor(team, path, team_name, username, key_prefix):
+    render_team_logo(team, 88)
+    with st.form(f"team_logo_form_{key_prefix}"):
+        upload = st.file_uploader("Logo-ul echipei (PNG, JPG sau WEBP · max. 2 MB)",
+            type=["png", "jpg", "jpeg", "webp"], key=f"team_logo_upload_{key_prefix}")
+        submitted = st.form_submit_button("Salvează logo-ul", type="primary")
+    if submitted:
+        try:
+            if upload is None:
+                raise ValueError("Alege mai întâi un fișier logo.")
+            save_team_logo(path, username, team_name, upload)
+            st.toast("Logo-ul echipei a fost salvat.", icon="🛡️")
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+    if team.get("logo") and st.button("Șterge logo-ul", key=f"remove_team_logo_{key_prefix}"):
+        try:
+            save_team_logo(path, username, team_name, remove=True)
+            st.toast("Logo-ul echipei a fost șters.", icon="🗑️")
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+
 def save_manager_lineup(path, username, fixture_id, team_name, formation, positions):
     fresh = load_league(path)
     member = _team_manager_member(fresh, username)
@@ -2259,7 +2343,10 @@ def render_team_manager_panel(data, path, username, team_name):
         return
     st.markdown(f"### ⚽ {team_name}")
     league_slug = safe_slug(str(path))
-    lineup_tab, players_tab = st.tabs(["Echipă de start", "Adaugă jucători"])
+    lineup_tab, players_tab, logo_tab = st.tabs(["Echipă de start", "Adaugă jucători", "Logo echipă"])
+    with logo_tab:
+        render_team_logo_editor(data["echipe"][team_name], path, team_name, username,
+                                f"manager_{league_slug}_{safe_slug(team_name)}")
     with players_tab:
         with st.form(f"manager_add_player_{league_slug}"):
             player_name = st.text_input("Numele jucătorului")
@@ -2886,7 +2973,7 @@ def render_live_ticker(path):
         unsafe_allow_html=True)
 
 
-def render_cards(rows):
+def render_cards(rows, team_data=None):
     """Render compact, themed rows matching the original app's Treeview tables."""
     rows = list(rows)
     if not rows:
@@ -2905,8 +2992,14 @@ def render_cards(rows):
                 words = [word for word in str(value).split()
                          if word.casefold() not in {"fc", "sc", "cs", "ac", "afc"}]
                 initials = "".join(word[0] for word in words[:2]).upper() or "⚽"
-                shown = (f"<span class='team-name-cell'><span class='team-avatar' aria-hidden='true'>"
-                         f"{html.escape(initials)}</span><span>{shown}</span></span>")
+                team = (team_data or {}).get(str(value), {})
+                logo = team.get("logo", "") if isinstance(team, dict) else ""
+                if _team_logo_bytes(team):
+                    image = (f"<img class='team-logo-inline' src='{html.escape(logo, quote=True)}' "
+                             f"alt='' loading='lazy'>")
+                else:
+                    image = f"<span class='team-avatar' aria-hidden='true'>{html.escape(initials)}</span>"
+                shown = f"<span class='team-name-cell'>{image}<span>{shown}</span></span>"
             rendered_cells.append(f'<td data-label="{label}">{shown}</td>')
         body_rows.append(f"<tr>{''.join(rendered_cells)}</tr>")
     markup = ("<div class='league-table-wrap'><table class='league-table'>"
@@ -3170,7 +3263,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
     t1, t2 = tabs[0], tabs[2]
     with t1:
         st.subheader(data.get("nume_liga", "Liga"))
-        render_cards(ranking(data))
+        render_cards(ranking(data), data.get("echipe", {}))
     with t2:
         viewer_league_slug = safe_slug(league_key(entry))
         viewer_team_key = f"viewer_roster_team_{viewer_league_slug}"
@@ -3194,6 +3287,9 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 for index, team_name in enumerate(team_names):
                     team_info = data["echipe"][team_name]
                     column = team_columns[index % 2]
+                    logo_bytes = _team_logo_bytes(team_info)
+                    if logo_bytes:
+                        column.image(BytesIO(logo_bytes), width=48)
                     if column.button(f"⚽ {team_name}", key=f"viewer_open_team_{viewer_league_slug}_{index}",
                                      width="stretch"):
                         st.session_state[viewer_team_key] = team_name
@@ -3223,6 +3319,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 st.rerun()
             st.markdown(f"### ⚽ {viewer_team_name}")
             team_info = viewer_team
+            render_team_logo(team_info, 96)
             team_columns = st.columns(3)
             team_columns[0].metric("Meciuri", team_info.get("meciuri_jucate", 0))
             team_columns[1].metric("Puncte", team_info.get("puncte", 0))
@@ -4282,7 +4379,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
 @keyframes live-pulse{50%{box-shadow:0 0 0 7px #ff5f6508}}
 .live-score-line{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:.65rem;margin:.55rem 0;color:#f3f7fc;font-weight:750}
 .live-score-line span:first-child{text-align:right}.live-score-line span:last-child{text-align:left}.live-score-line strong{font-family:'Manrope',sans-serif;font-size:1.4rem;color:#f4c66e;white-space:nowrap}.live-minute{color:#69e0a0!important;font-size:1rem}
-.team-name-cell{display:inline-flex;align-items:center;gap:.6rem}.team-avatar{width:1.85rem;height:1.85rem;display:inline-grid;place-items:center;flex:none;border-radius:50%;background:linear-gradient(145deg,#27496a,#17263a);border:1px solid #5e83a5;color:#dff3ff;font-size:.66rem;font-weight:900}
+.team-name-cell{display:inline-flex;align-items:center;gap:.6rem}.team-avatar{width:1.85rem;height:1.85rem;display:inline-grid;place-items:center;flex:none;border-radius:50%;background:linear-gradient(145deg,#27496a,#17263a);border:1px solid #5e83a5;color:#dff3ff;font-size:.66rem;font-weight:900}.team-logo-inline{width:1.85rem;height:1.85rem;object-fit:contain;flex:none;border-radius:50%;background:#fff;padding:2px;border:1px solid #5e83a5}
 .team-form-row{display:flex;gap:.45rem;margin:.35rem 0 .6rem}.form-badge{width:2rem;height:2rem;display:inline-grid;place-items:center;border-radius:50%;font-weight:900;font-size:.82rem;border:1px solid transparent}
 .form-win{background:#143d2c;color:#70e4a7;border-color:#287a53}.form-draw{background:#41351c;color:#f5d17d;border-color:#8a6a2f}.form-loss{background:#46262d;color:#ff9aa0;border-color:#8b444d}
 @media(max-width:767px){
@@ -4302,6 +4399,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
  table.league-table tr td:first-child:before{content:"";display:none}
  .team-name-cell{justify-content:flex-end}
  .team-avatar{width:1.65rem;height:1.65rem}
+ .team-logo-inline{width:1.65rem;height:1.65rem}
  .live-ticker{padding:.75rem;border-radius:15px}
  .live-ticker-heading{align-items:flex-start;flex-direction:column;gap:.15rem}
  .live-score-card{padding:.75rem}
@@ -4651,7 +4749,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
         c2.metric("Meciuri", len(data["istoric_meciuri"]))
         c3.metric("Jucători", sum(len(t["jucatori"]) for t in data["echipe"].values()))
         if data["echipe"]:
-            render_cards(ranking(data))
+            render_cards(ranking(data), data.get("echipe", {}))
             st.caption("Forma ultimelor cinci meciuri: V = victorie · E = egal · Î = înfrângere")
         else:
             st.info("Adaugă echipe pentru a vedea clasamentul.")
@@ -4822,6 +4920,9 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 for index, team_name in enumerate(team_names):
                     team_info = data["echipe"][team_name]
                     column = team_columns[index % 2]
+                    logo_bytes = _team_logo_bytes(team_info)
+                    if logo_bytes:
+                        column.image(BytesIO(logo_bytes), width=48)
                     if column.button(f"⚽ {team_name}", key=f"open_team_{league_slug}_{index}", width="stretch"):
                         st.session_state[team_state_key] = team_name
                         st.session_state.pop(player_state_key, None)
@@ -4926,6 +5027,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     st.session_state.pop(team_state_key, None)
                     st.rerun()
                 st.markdown(f"### ⚽ {selected_team_name}")
+                render_team_logo(team, 96)
                 summary = st.columns(3)
                 summary[0].metric("Meciuri", team.get("meciuri_jucate", 0))
                 summary[1].metric("Puncte", team.get("puncte", 0))
@@ -4933,6 +5035,10 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 render_team_recent_form(data, selected_team_name)
 
                 if can_edit_roster:
+                    st.markdown("#### Logo-ul echipei")
+                    render_team_logo_editor(team, path, selected_team_name, username,
+                        f"editor_{league_slug}_{safe_slug(selected_team_name)}")
+                    st.divider()
                     with st.form(f"rename_team_form_{league_slug}_{safe_slug(selected_team_name)}"):
                         renamed_team = st.text_input("Numele echipei", value=selected_team_name)
                         save_team_name = st.form_submit_button("Salvează numele echipei")
