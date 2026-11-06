@@ -2,3 +2,4 @@ streamlit>=1.42,<2
 supabase>=2.15,<3
 extra-streamlit-components>=0.1.71,<1
 qrcode[pil]>=7.4,<9
+stripe>=16,<17
