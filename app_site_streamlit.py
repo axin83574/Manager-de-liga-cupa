@@ -4954,9 +4954,11 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
     if competition_type == "Ligă":
         pages = [page_name for page_name in pages if page_name not in ("Cupa", "Supercupa")]
     elif competition_type == "Cupă":
-        # Cup-only competitions have no league table, awards, transfers or supercup.
+        # Cup-only competitions keep statistics, but omit league standings,
+        # league awards, transfers and supercup.
         pages = [page_name for page_name in pages if page_name not in
-                 ("Clasament", "Statistici", "Supercupa", "Premii sezon", "Transferuri")]
+                 ("Clasament", "Supercupa", "Premii sezon", "Transferuri")]
+        pages = ["Cupa", *[page_name for page_name in pages if page_name != "Cupa"]]
     if is_guest and guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
         pages.insert(-1, "Alegerea mea")
     navigation_labels = {
