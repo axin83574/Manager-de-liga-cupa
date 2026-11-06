@@ -228,6 +228,103 @@ def save_users(users):
     os.replace(temp, USERS_FILE)
 
 
+def support_admin_username():
+    try:
+        return str(st.secrets.get("SUPPORT_ADMIN_USERNAME", "")).strip().casefold()
+    except Exception:
+        return ""
+
+
+def submit_support_request(username, sender_name, sender_email, category, subject, message, league_name=""):
+    if not SUPABASE_ENABLED:
+        raise ValueError("Trimiterea mesajelor necesită o conexiune Supabase activă.")
+    clean_message = str(message or "").strip()
+    clean_subject = str(subject or "").strip()
+    clean_name = str(sender_name or "").strip()
+    clean_email = str(sender_email or "").strip()
+    if not clean_name or not clean_subject or not clean_message:
+        raise ValueError("Completează numele, subiectul și mesajul.")
+    if len(clean_subject) > 120 or len(clean_message) > 4000:
+        raise ValueError("Subiectul poate avea 120 de caractere, iar mesajul 4.000.")
+    if clean_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", clean_email):
+        raise ValueError("Adresa de e-mail nu pare validă.")
+    payload = {"sender_username": str(username or "").strip() or None,
+        "sender_name": clean_name[:120], "sender_email": clean_email[:254],
+        "category": str(category or "Altceva")[:60], "subject": clean_subject,
+        "message": clean_message, "league_name": str(league_name or "")[:120],
+        "status": "nou"}
+    supabase_client().table("app_support_messages").insert(payload).execute()
+
+
+def load_support_requests():
+    return (supabase_client().table("app_support_messages")
+        .select("id,created_at,sender_username,sender_name,sender_email,category,subject,message,league_name,status")
+        .order("created_at", desc=True).limit(100).execute().data or [])
+
+
+def set_support_request_status(request_id, status):
+    if status not in {"nou", "rezolvat"}:
+        raise ValueError("Starea solicitării nu este validă.")
+    supabase_client().table("app_support_messages").update({"status": status}).eq("id", request_id).execute()
+
+
+def render_support_page(username, profile, current_league_name=""):
+    st.title("💬 Suportul aplicației")
+    st.caption("Raportează un bug, cere o modificare sau trimite-ne o întrebare. Mesajele sunt private și vizibile doar echipei de suport.")
+    is_support_admin = bool(username and support_admin_username()
+        and str(username).strip().casefold() == support_admin_username())
+    view_tabs = st.tabs(["Trimite un mesaj", "Mesaje primite"]) if is_support_admin else None
+    form_area = view_tabs[0] if view_tabs else st.container()
+    with form_area:
+        if not SUPABASE_ENABLED:
+            st.warning("Suportul nu este disponibil momentan, deoarece Supabase nu este conectat.")
+        with st.form("global_support_request_form", clear_on_submit=False):
+            sender_name = st.text_input("Numele tău", value=str(profile.get("nume") or username or "").strip())
+            sender_email = st.text_input("E-mail pentru răspuns (opțional)",
+                value=str(profile.get("email") or ""))
+            category = st.selectbox("Despre ce ne scrii?",
+                ["Bug / problemă", "Vreau o modificare", "Cont și conectare", "Datele ligii", "Altceva"])
+            subject = st.text_input("Subiect", max_chars=120)
+            message = st.text_area("Mesaj", max_chars=4000, height=160,
+                placeholder="Descrie problema sau modificarea dorită. Dacă poți, spune ce pagină foloseai și ce pași ai făcut.")
+            send_message = st.form_submit_button("Trimite mesajul", type="primary", disabled=not SUPABASE_ENABLED)
+        if send_message:
+            try:
+                submit_support_request(username, sender_name, sender_email, category, subject,
+                    message, current_league_name)
+                st.success("Mesajul a fost trimis. Mulțumim că ne-ai anunțat!")
+            except Exception as exc:
+                st.error(f"Mesajul nu a putut fi trimis: {exc}")
+    if is_support_admin:
+        with view_tabs[1]:
+            st.caption("Ultimele 100 de solicitări. Răspunde utilizatorului la adresa indicată, apoi marchează mesajul ca rezolvat.")
+            try:
+                requests = load_support_requests()
+            except Exception as exc:
+                st.error(f"Nu pot încărca inboxul. Verifică dacă tabela app_support_messages a fost creată în Supabase. ({exc})")
+                requests = []
+            if not requests:
+                st.info("Nu ai primit încă mesaje.")
+            for request in requests:
+                with st.container(border=True):
+                    status_label = "✅ Rezolvat" if request.get("status") == "rezolvat" else "🆕 Nou"
+                    st.markdown(f"**{request.get('subject') or 'Fără subiect'}** · {status_label}")
+                    sender = request.get("sender_name") or request.get("sender_username") or "Utilizator"
+                    st.caption(f"{sender} · {request.get('sender_email') or 'fără e-mail de răspuns'} · "
+                        f"{request.get('category', 'Altceva')} · {request.get('created_at', '')}")
+                    if request.get("league_name"):
+                        st.caption(f"Liga menționată: {request['league_name']}")
+                    st.write(request.get("message", ""))
+                    status = "rezolvat" if request.get("status") != "rezolvat" else "nou"
+                    label = "Marchează ca rezolvat" if status == "rezolvat" else "Redeschide solicitarea"
+                    if st.button(label, key=f"support_status_{request.get('id')}"):
+                        try:
+                            set_support_request_status(request.get("id"), status)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Nu am putut actualiza solicitarea: {exc}")
+
+
 def cookie_is_secure():
     try:
         forwarded = st.context.headers.get("X-Forwarded-Proto", "")
@@ -4685,7 +4782,24 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 st.session_state["show_account_profile"] = True
                 st.session_state["show_player_profile"] = True
                 st.rerun()
+        if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support"):
+            st.session_state["show_global_support"] = True
+            st.rerun()
         st.divider()
+    if st.session_state.get("show_global_support"):
+        if st.button("← Înapoi la aplicație", key="back_from_global_support"):
+            st.session_state.pop("show_global_support", None)
+            st.rerun()
+        current_league_name = ""
+        selected_league_key = st.session_state.get("entered_league")
+        support_entry = next((item for item in paths
+            if league_key(item) == selected_league_key), None)
+        if support_entry:
+            current_league_name = load_league(support_entry["path"]).get("nume_liga", "")
+        elif is_guest and guest_entry:
+            current_league_name = load_league(guest_entry["path"]).get("nume_liga", "")
+        render_support_page(username, profile, current_league_name)
+        return
     if st.session_state.get("show_account_profile") and not is_guest:
         if st.button(f"↩ {tr('Înapoi la aplicație')}"):
             st.session_state.pop("show_account_profile", None)
