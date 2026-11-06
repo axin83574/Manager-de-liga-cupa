@@ -1819,6 +1819,29 @@ def ranking(data):
     return sorted(rows, key=lambda x: (-x["Pct"], -x["DG"], -x["GM"], x["Echipă"]))
 
 
+def render_team_recent_form(data, team_name):
+    matches = [match for match in ordered_by_stage(data.get("istoric_meciuri", []))
+               if team_name in (match.get("e1"), match.get("e2"))][-5:]
+    st.markdown("#### Formă recentă · ultimele 5 meciuri")
+    if not matches:
+        st.caption("Echipa nu are încă rezultate înregistrate.")
+        return
+    badges = []
+    descriptions = []
+    for match in matches:
+        home = match.get("e1") == team_name
+        goals_for = int(match.get("goluri_e1" if home else "goluri_e2", 0) or 0)
+        goals_against = int(match.get("goluri_e2" if home else "goluri_e1", 0) or 0)
+        result, class_name = (("V", "form-win") if goals_for > goals_against else
+                              ("Î", "form-loss") if goals_for < goals_against else ("E", "form-draw"))
+        score = f"{goals_for}–{goals_against}"
+        opponent = match.get("e2" if home else "e1", "—")
+        badges.append(f"<span class='form-badge {class_name}' title='{html.escape(opponent)} {score}'>{result}</span>")
+        descriptions.append(f"{opponent} {score}")
+    st.markdown("<div class='team-form-row'>" + "".join(badges) + "</div>", unsafe_allow_html=True)
+    st.caption(" · ".join(descriptions))
+
+
 def player_leaderboard(data, stat_key, label):
     players = [(player, team_name, stats.get(stat_key, 0))
                for team_name, team in data["echipe"].items()
@@ -2805,6 +2828,42 @@ def render_live_matches_overview(path):
         st.caption("Evenimentele vor apărea aici în timp real.")
 
 
+@st.fragment(run_every=5)
+def render_live_ticker(path):
+    data = load_league(path)
+    live_fixtures = [fixture for fixture in data.get("program", [])
+                     if fixture.get("arbitraj_live", {}).get("faza", "programat") not in {"programat", "final"}]
+    if not live_fixtures:
+        return
+    phase_labels = {"repriza1": "Prima repriză", "repriza1_expirata": "Prelungiri",
+                    "prelungiri1": "Prelungiri", "prelungiri1_expirate": "Pauză",
+                    "pauza": "Pauză", "repriza2": "A doua repriză",
+                    "repriza2_expirata": "Prelungiri", "prelungiri2": "Prelungiri",
+                    "prelungiri2_expirate": "Fluier final în așteptare",
+                    "final_așteptare": "Fluier final în așteptare"}
+    cards = []
+    for fixture in ordered_by_stage(live_fixtures):
+        live = fixture.get("arbitraj_live", {})
+        home_goals, away_goals = _live_match_score(data, fixture, live)
+        shown, _, effective, _ = _live_clock(live)
+        phase = phase_labels.get(effective, phase_labels.get(live.get("faza"), "În desfășurare"))
+        cards.append(
+            "<article class='live-score-card'>"
+            f"<div class='live-score-meta'><span class='live-pill'><i></i> LIVE</span>"
+            f"<span>Etapa {html.escape(str(fixture.get('etapa') or '—'))}</span></div>"
+            "<div class='live-score-line'>"
+            f"<span>{html.escape(str(fixture.get('e1', 'Gazde')))}</span>"
+            f"<strong>{home_goals} – {away_goals}</strong>"
+            f"<span>{html.escape(str(fixture.get('e2', 'Oaspeți')))}</span></div>"
+            f"<div class='live-score-meta'><span>{html.escape(phase)}</span>"
+            f"<b class='live-minute'>{html.escape(str(shown))}</b></div></article>")
+    st.markdown(
+        "<section class='live-ticker'><div class='live-ticker-heading'>"
+        "<span>⚽ LIVE ACUM</span><small>Scorul și cronometrul se actualizează automat</small></div>"
+        f"<div class='live-ticker-grid'>{''.join(cards)}</div></section>",
+        unsafe_allow_html=True)
+
+
 def render_cards(rows):
     """Render compact, themed rows matching the original app's Treeview tables."""
     rows = list(rows)
@@ -2815,10 +2874,19 @@ def render_cards(rows):
     head = "".join(f"<th>{html.escape(str(tr(column)))}</th>" for column in columns)
     body_rows = []
     for row in rows:
-        cells = "".join(
-            f"<td>{html.escape(str(tr(row.get(column)) if row.get(column) not in (None, '') else '–'))}</td>"
-            for column in columns)
-        body_rows.append(f"<tr>{cells}</tr>")
+        rendered_cells = []
+        for column in columns:
+            value = row.get(column)
+            shown = html.escape(str(tr(value) if value not in (None, "") else "–"))
+            label = html.escape(str(tr(column)), quote=True)
+            if column == "Echipă" and value not in (None, ""):
+                words = [word for word in str(value).split()
+                         if word.casefold() not in {"fc", "sc", "cs", "ac", "afc"}]
+                initials = "".join(word[0] for word in words[:2]).upper() or "⚽"
+                shown = (f"<span class='team-name-cell'><span class='team-avatar' aria-hidden='true'>"
+                         f"{html.escape(initials)}</span><span>{shown}</span></span>")
+            rendered_cells.append(f'<td data-label="{label}">{shown}</td>')
+        body_rows.append(f"<tr>{''.join(rendered_cells)}</tr>")
     markup = ("<div class='league-table-wrap'><table class='league-table'>"
               f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
               "</table></div>")
@@ -2977,6 +3045,12 @@ def render_motm_voting(data, match, path, username=None, profile=None,
                                                               candidate[1].casefold(), candidate[0].casefold()))
         render_cards([{"Jucător": player, "Echipă": team, "Voturi": counts.get((team, player), 0)}
                       for team, player in ordered if counts.get((team, player), 0)])
+        for team, player in ordered[:3]:
+            candidate_votes = counts.get((team, player), 0)
+            if candidate_votes:
+                percent = round(100 * candidate_votes / total)
+                st.progress(candidate_votes / total,
+                    text=f"{player} · {candidate_votes} voturi ({percent}%)")
         best = max(counts.values())
         leaders = [player for (team, player), count in counts.items() if count == best]
         st.caption((f"Lider la vot: {', '.join(leaders)} · {best} voturi · {total} voturi în total")
@@ -3099,6 +3173,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
             team_columns[0].metric("Meciuri", team_info.get("meciuri_jucate", 0))
             team_columns[1].metric("Puncte", team_info.get("puncte", 0))
             team_columns[2].metric("Trofee", len(trofee_echipa(data, viewer_team_name)))
+            render_team_recent_form(data, viewer_team_name)
             st.markdown("#### Lot")
             player_items = list(team_info.get("jucatori", {}).items())
             if player_items:
@@ -4142,12 +4217,42 @@ a{color:#69e0a0!important}
 [class*="st-key-viewer_open_player_"] div.stButton > button:hover { transform:translateY(-2px);filter:brightness(1.15);box-shadow:0 9px 22px rgba(0,0,0,.28)!important; }
 .bike-ad-wrap{margin-bottom:1.4rem!important}
 a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,.22)!important}
+.live-ticker{margin:0 0 1.2rem;padding:1rem;border:1px solid #613f48;border-radius:18px;background:linear-gradient(125deg,#241921,#171c29 65%,#14241f);box-shadow:0 12px 28px rgba(0,0,0,.2)}
+.live-ticker-heading{display:flex;align-items:center;gap:.8rem;margin-bottom:.8rem;color:#f2f6fc;font-weight:850;letter-spacing:.04em}
+.live-ticker-heading>span{color:#ff6b70}.live-ticker-heading small{color:#9aabc0;font-weight:550;letter-spacing:0}
+.live-ticker-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:.7rem}
+.live-score-card{padding:.9rem 1rem;border:1px solid #3d485c;border-radius:14px;background:linear-gradient(135deg,#192538,#14202d)}
+.live-score-meta{display:flex;align-items:center;justify-content:space-between;gap:.5rem;color:#a8b8cb;font-size:.8rem}
+.live-pill{display:inline-flex;align-items:center;gap:.38rem;color:#ff7378;font-weight:900;letter-spacing:.08em}
+.live-pill i{width:.5rem;height:.5rem;border-radius:50%;background:#ff5f65;box-shadow:0 0 0 4px #ff5f6524;animation:live-pulse 1.8s infinite}
+@keyframes live-pulse{50%{box-shadow:0 0 0 7px #ff5f6508}}
+.live-score-line{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:.65rem;margin:.55rem 0;color:#f3f7fc;font-weight:750}
+.live-score-line span:first-child{text-align:right}.live-score-line span:last-child{text-align:left}.live-score-line strong{font-family:'Manrope',sans-serif;font-size:1.4rem;color:#f4c66e;white-space:nowrap}.live-minute{color:#69e0a0!important;font-size:1rem}
+.team-name-cell{display:inline-flex;align-items:center;gap:.6rem}.team-avatar{width:1.85rem;height:1.85rem;display:inline-grid;place-items:center;flex:none;border-radius:50%;background:linear-gradient(145deg,#27496a,#17263a);border:1px solid #5e83a5;color:#dff3ff;font-size:.66rem;font-weight:900}
+.team-form-row{display:flex;gap:.45rem;margin:.35rem 0 .6rem}.form-badge{width:2rem;height:2rem;display:inline-grid;place-items:center;border-radius:50%;font-weight:900;font-size:.82rem;border:1px solid transparent}
+.form-win{background:#143d2c;color:#70e4a7;border-color:#287a53}.form-draw{background:#41351c;color:#f5d17d;border-color:#8a6a2f}.form-loss{background:#46262d;color:#ff9aa0;border-color:#8b444d}
 @media(max-width:767px){
  [data-testid="stMainBlockContainer"]{padding:1rem .75rem 3rem!important}
  [data-testid="stHorizontalBlock"]{flex-direction:column!important;align-items:stretch!important;gap:.65rem!important}
  [data-testid="stHorizontalBlock"]>[data-testid="column"]{width:100%!important;min-width:100%!important;flex:1 1 100%!important}
  div.stButton>button,div.stFormSubmitButton>button{width:100%!important;min-height:48px!important}
  [data-testid="stDataFrame"],[data-testid="stTable"]{max-width:100%!important;overflow-x:auto!important}
+ .league-table-wrap{overflow:visible!important;border:0!important;background:transparent!important;box-shadow:none!important}
+ table.league-table,table.league-table tbody{display:block!important;width:100%!important}
+ table.league-table thead{display:none!important}
+ table.league-table tr{display:block!important;margin:0 0 .75rem!important;padding:.35rem .8rem!important;border:1px solid #344860!important;border-radius:14px!important;background:linear-gradient(145deg,#14243a,#111c2c)!important;box-shadow:0 7px 18px rgba(0,0,0,.16)!important}
+ table.league-table td{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:.8rem!important;padding:.48rem 0!important;white-space:normal!important;border-bottom:1px solid #293a50!important;text-align:right!important}
+ table.league-table td:last-child{border-bottom:0!important}
+ table.league-table td:before{content:attr(data-label);color:#9aabc0;font-size:.72rem;font-weight:800;text-align:left}
+ table.league-table tr td:first-child{font-weight:850;color:#f3f7fc!important}
+ table.league-table tr td:first-child:before{content:"";display:none}
+ .team-name-cell{justify-content:flex-end}
+ .team-avatar{width:1.65rem;height:1.65rem}
+ .live-ticker{padding:.75rem;border-radius:15px}
+ .live-ticker-heading{align-items:flex-start;flex-direction:column;gap:.15rem}
+ .live-score-card{padding:.75rem}
+ .live-score-line{gap:.4rem;font-size:.84rem}
+ .live-score-line strong{font-size:1.2rem}
  [data-testid="stMetric"]{padding:.8rem!important;border-radius:14px!important}
  h1{font-size:1.7rem!important}
  [data-baseweb="tab-list"]{gap:.35rem!important;flex-wrap:wrap!important}
@@ -4398,6 +4503,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
     owner = selected_entry["owner"]
     st.session_state["active_league_role"] = role
     data = load_league(path)
+    render_live_ticker(path)
     if role not in {"owner", "editor"}:
         st.title(data.get("nume_liga", "Liga"))
         st.caption(f"Partajată de @{owner}")
@@ -4750,6 +4856,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 summary[0].metric("Meciuri", team.get("meciuri_jucate", 0))
                 summary[1].metric("Puncte", team.get("puncte", 0))
                 summary[2].metric("Trofee", len(trofee_echipa(data, selected_team_name)))
+                render_team_recent_form(data, selected_team_name)
 
                 if can_edit_roster:
                     with st.form(f"rename_team_form_{league_slug}_{safe_slug(selected_team_name)}"):
