@@ -1958,6 +1958,19 @@ def filter_by_stage(records, widget_key, label="Alege etapa"):
     return [item for item in records if str(item.get("etapa")) == stage]
 
 
+def compact_list(records, widget_key, page_size=10):
+    records = list(records)
+    if len(records) <= page_size:
+        return records
+    expanded_key = f"{widget_key}_expanded"
+    expanded = st.session_state.get(expanded_key, False)
+    if st.button("Arată mai puține" if expanded else f"Vezi mai multe ({len(records) - page_size} rezultate)",
+            key=f"{widget_key}_toggle"):
+        st.session_state[expanded_key] = not expanded
+        st.rerun()
+    return records if expanded else records[:page_size]
+
+
 def render_fixture_card(fixture, status="Programat", score=None):
     home, away = str(fixture.get("e1", "Gazde")), str(fixture.get("e2", "Oaspeți"))
     with st.container(border=True):
@@ -2443,20 +2456,22 @@ def render_team_manager_panel(data, path, username, team_name):
     league_slug = safe_slug(str(path))
     lineup_tab, players_tab, logo_tab = st.tabs(["Echipă de start", "Adaugă jucători", "Logo echipă"])
     with logo_tab:
-        render_team_logo_editor(data["echipe"][team_name], path, team_name, username,
-                                f"manager_{league_slug}_{safe_slug(team_name)}")
+        with st.expander("Încarcă sau schimbă logo-ul", expanded=False):
+            render_team_logo_editor(data["echipe"][team_name], path, team_name, username,
+                                    f"manager_{league_slug}_{safe_slug(team_name)}")
     with players_tab:
-        with st.form(f"manager_add_player_{league_slug}"):
-            player_name = st.text_input("Numele jucătorului")
-            player_number = st.text_input("Numărul de pe tricou (opțional)", max_chars=3)
-            add_player = st.form_submit_button("＋ Adaugă rapid în lot", type="primary")
-        if add_player:
-            try:
-                save_manager_player(path, username, player_name, player_number)
-                st.success("Jucătorul a fost adăugat în lot.")
-                st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
+        with st.expander("＋ Adaugă rapid un jucător", expanded=False):
+            with st.form(f"manager_add_player_{league_slug}"):
+                player_name = st.text_input("Numele jucătorului")
+                player_number = st.text_input("Numărul de pe tricou (opțional)", max_chars=3)
+                add_player = st.form_submit_button("＋ Adaugă rapid în lot", type="primary")
+            if add_player:
+                try:
+                    save_manager_player(path, username, player_name, player_number)
+                    st.success("Jucătorul a fost adăugat în lot.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
         st.divider()
         st.markdown("#### Lotul echipei")
         render_roster_groups(data["echipe"][team_name],
@@ -2685,24 +2700,25 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
         phase = live.get("faza", "programat")
         reset_key = f"ref_reset_confirm_{key}"
         if phase != "programat":
-            if st.button("↺ Resetează meciul", key=f"ref_reset_{key}"):
-                st.session_state[reset_key] = True
-            if st.session_state.get(reset_key):
-                st.warning("Se vor șterge scorul, evenimentele și timpul acestui meci. Acțiunea nu poate fi anulată.")
-                reset_yes, reset_no = st.columns(2)
-                if reset_yes.button("Confirmă resetarea", type="primary", key=f"{reset_key}_yes"):
-                    live = {"faza": "programat", "half_minutes": configured_half_minutes,
-                        "jucatori_pe_teren": configured_players_on_field, "secunde": 0,
-                        "minute_extra": 0, "minute_extra_total": 0, "pornit_la": None,
-                        "evenimente": []}
-                    fixture["arbitraj_live"] = live
-                    save_referee_state(path, fixture_id, referee_code, live)
-                    st.session_state.pop(reset_key, None)
-                    st.toast("Meciul a fost resetat.", icon="↺")
-                    st.rerun()
-                if reset_no.button("Păstrează meciul", key=f"{reset_key}_no"):
-                    st.session_state.pop(reset_key, None)
-                    st.rerun()
+            with st.expander("⚠ Opțiuni pentru resetarea meciului", expanded=False):
+                if st.button("↺ Resetează meciul", key=f"ref_reset_{key}"):
+                    st.session_state[reset_key] = True
+                if st.session_state.get(reset_key):
+                    st.warning("Se vor șterge scorul, evenimentele și timpul acestui meci. Acțiunea nu poate fi anulată.")
+                    reset_yes, reset_no = st.columns(2)
+                    if reset_yes.button("Confirmă resetarea", type="primary", key=f"{reset_key}_yes"):
+                        live = {"faza": "programat", "half_minutes": configured_half_minutes,
+                            "jucatori_pe_teren": configured_players_on_field, "secunde": 0,
+                            "minute_extra": 0, "minute_extra_total": 0, "pornit_la": None,
+                            "evenimente": []}
+                        fixture["arbitraj_live"] = live
+                        save_referee_state(path, fixture_id, referee_code, live)
+                        st.session_state.pop(reset_key, None)
+                        st.toast("Meciul a fost resetat.", icon="↺")
+                        st.rerun()
+                    if reset_no.button("Păstrează meciul", key=f"{reset_key}_no"):
+                        st.session_state.pop(reset_key, None)
+                        st.rerun()
         if phase == "programat":
             st.info(f"Fiecare repriză durează {configured_half_minutes} minute. "
                     f"Fiecare echipă are {configured_players_on_field} jucători pe teren.")
@@ -3502,7 +3518,9 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 if selected_match is None:
                     st.session_state.pop(history_key, None)
                     st.subheader("Rezultate")
-                    for index, match in enumerate(ordered_matches):
+                    visible_matches = compact_list(ordered_matches,
+                        f"viewer_results_{safe_slug(league_key(entry))}")
+                    for index, match in enumerate(visible_matches):
                         render_fixture_card(match, "Încheiat",
                             f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)}")
                         label = (f"Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
@@ -4914,142 +4932,144 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
     if page == "Setări ligă":
         st.subheader("Setări ligă")
         settings_widget_id = safe_slug(league_key(selected_entry))
-        rename = st.text_input("Denumire", value=data["nume_liga"], key=f"rename_{settings_widget_id}")
-        if st.button("Salvează denumirea") and rename.strip():
-            data["nume_liga"] = rename.strip(); save_league(path, data); st.rerun()
-        st.markdown("**Durata și formatul meciului**")
         league_settings = data.setdefault("setari_liga", {})
-        with st.form(f"match_format_settings_{settings_widget_id}"):
-            format_cols = st.columns(2)
-            half_duration = format_cols[0].number_input("Durata unei reprize (minute)",
-                min_value=1, max_value=90, value=int(league_settings.get("durata_repriza", 45)),
-                step=1, key=f"league_half_duration_{settings_widget_id}")
-            players_per_team = format_cols[1].number_input("Jucători pe teren pentru fiecare echipă",
-                min_value=1, max_value=11, value=int(league_settings.get("jucatori_pe_teren", 11)),
-                step=1, key=f"league_players_on_field_{settings_widget_id}")
-            save_match_format = st.form_submit_button("Salvează formatul meciului", type="primary")
-        if save_match_format:
-            league_settings["durata_repriza"] = int(half_duration)
-            league_settings["jucatori_pe_teren"] = int(players_per_team)
-            save_league(path, data)
-            st.success("Durata reprizelor și numărul de jucători au fost salvate.")
-            st.rerun()
-        st.divider()
-        st.markdown("**Votul pentru omul meciului**")
-        voting_modes = {
-            "Spectatorii votează; jucătorii echipelor din meci nu votează": "no_players",
-            "Toți pot vota; jucătorii nu se pot vota pe ei": "no_self_vote",
-        }
-        current_mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
-        current_label = next((label for label, value in voting_modes.items()
-                              if value == current_mode), next(iter(voting_modes)))
-        selected_mode_label = st.selectbox(
-            "Cine poate vota?", list(voting_modes), index=list(voting_modes).index(current_label),
-            key=f"motm_voting_mode_select_{settings_widget_id}")
-        if st.button("Salvează setările votului", key=f"save_motm_voting_settings_{settings_widget_id}"):
-            data.setdefault("setari_liga", {})["motm_voting_mode"] = voting_modes[selected_mode_label]
-            save_league(path, data)
-            st.success("Setarea votului pentru omul meciului a fost salvată.")
-            st.rerun()
-        st.divider()
-        st.markdown("**Premii de final de sezon**")
-        award_modes = {"Alegere directă de către proprietar/editor": "direct",
-                       "Vot cu punctaj pentru jucători": "vote"}
-        current_award_mode = data.get("setari_liga", {}).get("award_voting_mode", "direct")
-        current_award_label = next((label for label, value in award_modes.items()
-                                    if value == current_award_mode), "Alegere directă de către proprietar/editor")
-        selected_award_label = st.selectbox("Metoda de acordare a premiilor individuale",
-            list(award_modes), index=list(award_modes).index(current_award_label),
-            key=f"award_voting_mode_select_{settings_widget_id}")
-        if st.button("Salvează metoda premiilor", key=f"save_award_voting_mode_{settings_widget_id}"):
-            selected_mode = award_modes[selected_award_label]
-            settings = data.setdefault("setari_liga", {})
-            if selected_mode == "direct" and settings.get("award_voting_open"):
-                settings["award_voting_open"] = False
-                finalize_award_vote_results(data)
-            elif selected_mode == "vote" and current_award_mode != "vote":
-                for award in definitii_premii(data):
-                    if award["tip"] == "jucator" and not award_is_automatic(award):
-                        data.setdefault("premii_alese", {}).pop(award["cheie"], None)
-            settings["award_voting_mode"] = selected_mode
-            save_league(path, data)
-            st.success("Metoda de acordare a premiilor a fost salvată.")
-            st.rerun()
-        if current_award_mode == "vote":
-            if data.get("setari_liga", {}).get("award_voting_open"):
-                st.success("Votul pentru premiile de sezon este deschis.")
-                if st.button("Închide votul și calculează câștigătorii", key=f"close_award_voting_{settings_widget_id}"):
-                    data.setdefault("setari_liga", {})["award_voting_open"] = False
+        with st.expander("⚽ Formatul meciului", expanded=False):
+            with st.form(f"match_format_settings_{settings_widget_id}"):
+                format_cols = st.columns(2)
+                half_duration = format_cols[0].number_input("Durata unei reprize (minute)",
+                    min_value=1, max_value=90, value=int(league_settings.get("durata_repriza", 45)),
+                    step=1, key=f"league_half_duration_{settings_widget_id}")
+                players_per_team = format_cols[1].number_input("Jucători pe teren pentru fiecare echipă",
+                    min_value=1, max_value=11, value=int(league_settings.get("jucatori_pe_teren", 11)),
+                    step=1, key=f"league_players_on_field_{settings_widget_id}")
+                save_match_format = st.form_submit_button("Salvează formatul meciului", type="primary")
+            if save_match_format:
+                league_settings["durata_repriza"] = int(half_duration)
+                league_settings["jucatori_pe_teren"] = int(players_per_team)
+                save_league(path, data)
+                st.success("Durata reprizelor și numărul de jucători au fost salvate.")
+                st.rerun()
+        with st.expander("✏️ Redenumește liga", expanded=False):
+            with st.form(f"rename_league_form_{settings_widget_id}"):
+                rename = st.text_input("Denumire", value=data["nume_liga"], key=f"rename_{settings_widget_id}")
+                save_name = st.form_submit_button("Salvează denumirea", type="primary")
+            if save_name and rename.strip():
+                data["nume_liga"] = rename.strip()
+                save_league(path, data)
+                st.rerun()
+        with st.expander("⭐ Votul pentru omul meciului", expanded=False):
+            voting_modes = {
+                "Spectatorii votează; jucătorii echipelor din meci nu votează": "no_players",
+                "Toți pot vota; jucătorii nu se pot vota pe ei": "no_self_vote",
+            }
+            current_mode = data.get("setari_liga", {}).get("motm_voting_mode", "no_players")
+            current_label = next((label for label, value in voting_modes.items()
+                                  if value == current_mode), next(iter(voting_modes)))
+            selected_mode_label = st.selectbox(
+                "Cine poate vota?", list(voting_modes), index=list(voting_modes).index(current_label),
+                key=f"motm_voting_mode_select_{settings_widget_id}")
+            if st.button("Salvează setările votului", key=f"save_motm_voting_settings_{settings_widget_id}"):
+                data.setdefault("setari_liga", {})["motm_voting_mode"] = voting_modes[selected_mode_label]
+                save_league(path, data)
+                st.success("Setarea votului pentru omul meciului a fost salvată.")
+                st.rerun()
+        with st.expander("🏆 Premii de final de sezon", expanded=False):
+            award_modes = {"Alegere directă de către proprietar/editor": "direct",
+                           "Vot cu punctaj pentru jucători": "vote"}
+            current_award_mode = data.get("setari_liga", {}).get("award_voting_mode", "direct")
+            current_award_label = next((label for label, value in award_modes.items()
+                                        if value == current_award_mode), "Alegere directă de către proprietar/editor")
+            selected_award_label = st.selectbox("Metoda de acordare a premiilor individuale",
+                list(award_modes), index=list(award_modes).index(current_award_label),
+                key=f"award_voting_mode_select_{settings_widget_id}")
+            if st.button("Salvează metoda premiilor", key=f"save_award_voting_mode_{settings_widget_id}"):
+                selected_mode = award_modes[selected_award_label]
+                settings = data.setdefault("setari_liga", {})
+                if selected_mode == "direct" and settings.get("award_voting_open"):
+                    settings["award_voting_open"] = False
                     finalize_award_vote_results(data)
-                    save_league(path, data)
-                    st.success("Votul a fost închis și punctajele au fost calculate.")
-                    st.rerun()
-            else:
-                st.info("Votul este închis. Membrii ligii nu pot vota până nu îl activezi.")
-                if st.button("Deschide votul pentru premii", type="primary", key=f"open_award_voting_{settings_widget_id}"):
-                    data.setdefault("setari_liga", {})["award_voting_open"] = True
-                    save_league(path, data)
+                elif selected_mode == "vote" and current_award_mode != "vote":
+                    for award in definitii_premii(data):
+                        if award["tip"] == "jucator" and not award_is_automatic(award):
+                            data.setdefault("premii_alese", {}).pop(award["cheie"], None)
+                settings["award_voting_mode"] = selected_mode
+                save_league(path, data)
+                st.success("Metoda de acordare a premiilor a fost salvată.")
+                st.rerun()
+            if current_award_mode == "vote":
+                if data.get("setari_liga", {}).get("award_voting_open"):
                     st.success("Votul pentru premiile de sezon este deschis.")
-                    st.rerun()
-        st.divider()
-        st.markdown("**Schimbări în meciuri**")
-        substitution_rules = {
-            "5 schimbări pe meci · cine iese nu mai intră": "5_no_return",
-            "5 schimbări pe meci · cine iese mai poate intra": "5_return",
-            "Schimbări nelimitate · cine iese nu mai intră": "unlimited_no_return",
-            "Schimbări nelimitate · cine iese mai poate intra": "unlimited_return",
-        }
-        current_substitution_rule = data.get("setari_liga", {}).get("substitution_rule", "5_no_return")
-        current_substitution_label = next((label for label, value in substitution_rules.items()
-            if value == current_substitution_rule), next(iter(substitution_rules)))
-        selected_substitution_label = st.selectbox("Regula schimbărilor", list(substitution_rules),
-            index=list(substitution_rules).index(current_substitution_label),
-            key=f"substitution_rule_{settings_widget_id}")
-        st.caption("Limita de cinci schimbări se aplică separat fiecărei echipe și include prelungirile.")
-        if st.button("Salvează regula schimbărilor", key=f"save_substitution_rule_{settings_widget_id}"):
-            data.setdefault("setari_liga", {})["substitution_rule"] = substitution_rules[selected_substitution_label]
-            save_league(path, data)
-            st.success("Regula schimbărilor a fost salvată.")
-            st.rerun()
-        st.divider()
-        st.markdown("**Formatul cupelor eliminatorii**")
-        cup_leg_options = {"Un singur meci": "single", "Tur și retur": "home_away"}
-        current_leg_format = data.get("setari_liga", {}).get("cup_leg_format", "single")
-        selected_leg_label = st.selectbox("Format pentru cupele noi",
-            list(cup_leg_options),
-            index=list(cup_leg_options.values()).index(current_leg_format)
-                if current_leg_format in cup_leg_options.values() else 0,
-            key=f"cup_leg_format_select_{settings_widget_id}")
-        current_super_leg = data.get("setari_liga", {}).get("supercup_leg_format", "single")
-        selected_super_leg_label = st.selectbox("Format pentru Supercupele noi",
-            list(cup_leg_options),
-            index=list(cup_leg_options.values()).index(current_super_leg)
-                if current_super_leg in cup_leg_options.values() else 0,
-            key=f"supercup_leg_format_select_{settings_widget_id}")
-        cup_tie_options = {"Direct la penaltyuri": "penalties",
-                           "Două reprize de prelungiri, apoi penaltyuri dacă e egal": "extra_time"}
-        current_cup_tie = data.get("setari_liga", {}).get("cup_tie_resolution", "penalties")
-        selected_cup_tie = st.selectbox("Dacă egalitatea persistă în cupă",
-            list(cup_tie_options),
-            index=list(cup_tie_options.values()).index(current_cup_tie)
-                if current_cup_tie in cup_tie_options.values() else 0,
-            key=f"cup_tie_resolution_select_{settings_widget_id}")
-        current_super_tie = data.get("setari_liga", {}).get("supercup_tie_resolution", "penalties")
-        selected_super_tie = st.selectbox("Dacă finala Supercupei se termină egal",
-            list(cup_tie_options),
-            index=list(cup_tie_options.values()).index(current_super_tie)
-                if current_super_tie in cup_tie_options.values() else 0,
-            key=f"supercup_tie_resolution_select_{settings_widget_id}")
-        st.caption("Formatele se aplică competițiilor noi. Pentru o cupă sau Supercupă existentă, formatul se poate schimba înainte de primul rezultat.")
-        if st.button("Salvează setările cupelor", key=f"save_cup_settings_{settings_widget_id}"):
-            settings = data.setdefault("setari_liga", {})
-            settings["cup_leg_format"] = cup_leg_options[selected_leg_label]
-            settings["supercup_leg_format"] = cup_leg_options[selected_super_leg_label]
-            settings["cup_tie_resolution"] = cup_tie_options[selected_cup_tie]
-            settings["supercup_tie_resolution"] = cup_tie_options[selected_super_tie]
-            save_league(path, data)
-            st.success("Setările cupelor și Supercupei au fost salvate.")
-            st.rerun()
+                    if st.button("Închide votul și calculează câștigătorii", key=f"close_award_voting_{settings_widget_id}"):
+                        data.setdefault("setari_liga", {})["award_voting_open"] = False
+                        finalize_award_vote_results(data)
+                        save_league(path, data)
+                        st.success("Votul a fost închis și punctajele au fost calculate.")
+                        st.rerun()
+                else:
+                    st.info("Votul este închis. Membrii ligii nu pot vota până nu îl activezi.")
+                    if st.button("Deschide votul pentru premii", type="primary", key=f"open_award_voting_{settings_widget_id}"):
+                        data.setdefault("setari_liga", {})["award_voting_open"] = True
+                        save_league(path, data)
+                        st.success("Votul pentru premiile de sezon este deschis.")
+                        st.rerun()
+        with st.expander("🔁 Regula schimbărilor", expanded=False):
+            substitution_rules = {
+                "5 schimbări pe meci · cine iese nu mai intră": "5_no_return",
+                "5 schimbări pe meci · cine iese mai poate intra": "5_return",
+                "Schimbări nelimitate · cine iese nu mai intră": "unlimited_no_return",
+                "Schimbări nelimitate · cine iese mai poate intra": "unlimited_return",
+            }
+            current_substitution_rule = data.get("setari_liga", {}).get("substitution_rule", "5_no_return")
+            current_substitution_label = next((label for label, value in substitution_rules.items()
+                if value == current_substitution_rule), next(iter(substitution_rules)))
+            selected_substitution_label = st.selectbox("Regula schimbărilor", list(substitution_rules),
+                index=list(substitution_rules).index(current_substitution_label),
+                key=f"substitution_rule_{settings_widget_id}")
+            st.caption("Limita de cinci schimbări se aplică separat fiecărei echipe și include prelungirile.")
+            if st.button("Salvează regula schimbărilor", key=f"save_substitution_rule_{settings_widget_id}"):
+                data.setdefault("setari_liga", {})["substitution_rule"] = substitution_rules[selected_substitution_label]
+                save_league(path, data)
+                st.success("Regula schimbărilor a fost salvată.")
+                st.rerun()
+        with st.expander("🏆 Formatul cupelor eliminatorii", expanded=False):
+            cup_leg_options = {"Un singur meci": "single", "Tur și retur": "home_away"}
+            current_leg_format = data.get("setari_liga", {}).get("cup_leg_format", "single")
+            cup_columns = st.columns(2)
+            selected_leg_label = cup_columns[0].selectbox("Format pentru cupele noi",
+                list(cup_leg_options),
+                index=list(cup_leg_options.values()).index(current_leg_format)
+                    if current_leg_format in cup_leg_options.values() else 0,
+                key=f"cup_leg_format_select_{settings_widget_id}")
+            current_super_leg = data.get("setari_liga", {}).get("supercup_leg_format", "single")
+            selected_super_leg_label = cup_columns[1].selectbox("Format pentru Supercupele noi",
+                list(cup_leg_options),
+                index=list(cup_leg_options.values()).index(current_super_leg)
+                    if current_super_leg in cup_leg_options.values() else 0,
+                key=f"supercup_leg_format_select_{settings_widget_id}")
+            cup_tie_options = {"Direct la penaltyuri": "penalties",
+                               "Două reprize de prelungiri, apoi penaltyuri dacă e egal": "extra_time"}
+            current_cup_tie = data.get("setari_liga", {}).get("cup_tie_resolution", "penalties")
+            selected_cup_tie = cup_columns[0].selectbox("Dacă egalitatea persistă în cupă",
+                list(cup_tie_options),
+                index=list(cup_tie_options.values()).index(current_cup_tie)
+                    if current_cup_tie in cup_tie_options.values() else 0,
+                key=f"cup_tie_resolution_select_{settings_widget_id}")
+            current_super_tie = data.get("setari_liga", {}).get("supercup_tie_resolution", "penalties")
+            selected_super_tie = cup_columns[1].selectbox("Dacă finala Supercupei se termină egal",
+                list(cup_tie_options),
+                index=list(cup_tie_options.values()).index(current_super_tie)
+                    if current_super_tie in cup_tie_options.values() else 0,
+                key=f"supercup_tie_resolution_select_{settings_widget_id}")
+            st.caption("Formatele se aplică competițiilor noi. Pentru o cupă sau Supercupă existentă, formatul se poate schimba înainte de primul rezultat.")
+            if st.button("Salvează setările cupelor", key=f"save_cup_settings_{settings_widget_id}"):
+                settings = data.setdefault("setari_liga", {})
+                settings["cup_leg_format"] = cup_leg_options[selected_leg_label]
+                settings["supercup_leg_format"] = cup_leg_options[selected_super_leg_label]
+                settings["cup_tie_resolution"] = cup_tie_options[selected_cup_tie]
+                settings["supercup_tie_resolution"] = cup_tie_options[selected_super_tie]
+                save_league(path, data)
+                st.success("Setările cupelor și Supercupei au fost salvate.")
+                st.rerun()
 
     if page == "Echipe și jucători":
         st.subheader("Echipe și loturi")
@@ -5088,20 +5108,21 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 st.info("Nu există echipe în ligă încă.")
             if can_edit_roster:
                 st.divider()
-                with st.form(f"new_team_form_{league_slug}"):
-                    new_team_name = st.text_input("Numele echipei")
-                    add_team = st.form_submit_button("Adaugă echipă", type="primary")
-                if add_team:
-                    cleaned_name = new_team_name.strip()
-                    if not cleaned_name:
-                        st.error("Introdu numele echipei.")
-                    elif cleaned_name in data["echipe"]:
-                        st.error("Echipa există deja.")
-                    else:
-                        data["echipe"][cleaned_name] = {"jucatori": {}, **STATS_ECHIPA}
-                        save_league(path, data)
-                        st.session_state[team_state_key] = cleaned_name
-                        st.rerun()
+                with st.expander("＋ Adaugă o echipă", expanded=False):
+                    with st.form(f"new_team_form_{league_slug}"):
+                        new_team_name = st.text_input("Numele echipei")
+                        add_team = st.form_submit_button("Adaugă echipă", type="primary")
+                    if add_team:
+                        cleaned_name = new_team_name.strip()
+                        if not cleaned_name:
+                            st.error("Introdu numele echipei.")
+                        elif cleaned_name in data["echipe"]:
+                            st.error("Echipa există deja.")
+                        else:
+                            data["echipe"][cleaned_name] = {"jucatori": {}, **STATS_ECHIPA}
+                            save_league(path, data)
+                            st.session_state[team_state_key] = cleaned_name
+                            st.rerun()
         else:
             team = data["echipe"][selected_team_name]
             selected_player_name = st.session_state.get(player_state_key)
@@ -5194,41 +5215,41 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 render_team_recent_form(data, selected_team_name)
 
                 if can_edit_roster:
-                    st.markdown("#### ＋ Adaugă rapid un jucător")
-                    with st.form(f"add_player_form_{league_slug}_{safe_slug(selected_team_name)}"):
-                        new_player_name = st.text_input("Numele jucătorului", key=f"new_player_name_{league_slug}_{safe_slug(selected_team_name)}")
-                        new_player_number = st.text_input("Numărul de pe tricou (opțional)", max_chars=3,
-                            key=f"new_player_number_{league_slug}_{safe_slug(selected_team_name)}")
-                        add_player = st.form_submit_button("＋ Adaugă rapid în lot", type="primary")
-                    if add_player:
-                        cleaned_player_name = new_player_name.strip()
-                        if not cleaned_player_name:
-                            st.error("Introdu numele jucătorului.")
-                        elif cleaned_player_name in team["jucatori"]:
-                            st.error("Jucătorul există deja în lot.")
-                        else:
-                            team["jucatori"][cleaned_player_name] = {**STATS_JUCATOR,
-                                "pozitie": "", "numar": new_player_number.strip()}
-                            save_league(path, data)
-                            st.session_state[player_state_key] = cleaned_player_name
-                            st.rerun()
+                    with st.expander("＋ Adaugă rapid un jucător", expanded=False):
+                        with st.form(f"add_player_form_{league_slug}_{safe_slug(selected_team_name)}"):
+                            new_player_name = st.text_input("Numele jucătorului", key=f"new_player_name_{league_slug}_{safe_slug(selected_team_name)}")
+                            new_player_number = st.text_input("Numărul de pe tricou (opțional)", max_chars=3,
+                                key=f"new_player_number_{league_slug}_{safe_slug(selected_team_name)}")
+                            add_player = st.form_submit_button("＋ Adaugă rapid în lot", type="primary")
+                        if add_player:
+                            cleaned_player_name = new_player_name.strip()
+                            if not cleaned_player_name:
+                                st.error("Introdu numele jucătorului.")
+                            elif cleaned_player_name in team["jucatori"]:
+                                st.error("Jucătorul există deja în lot.")
+                            else:
+                                team["jucatori"][cleaned_player_name] = {**STATS_JUCATOR,
+                                    "pozitie": "", "numar": new_player_number.strip()}
+                                save_league(path, data)
+                                st.session_state[player_state_key] = cleaned_player_name
+                                st.rerun()
 
                 if can_edit_roster:
-                    st.markdown("#### Logo-ul echipei")
-                    render_team_logo_editor(team, path, selected_team_name, username,
-                        f"editor_{league_slug}_{safe_slug(selected_team_name)}")
-                    st.divider()
-                    with st.form(f"rename_team_form_{league_slug}_{safe_slug(selected_team_name)}"):
-                        renamed_team = st.text_input("Numele echipei", value=selected_team_name)
-                        save_team_name = st.form_submit_button("Salvează numele echipei")
-                    if save_team_name:
-                        try:
-                            rename_team(data, selected_team_name, renamed_team)
-                            save_league(path, data)
-                            st.session_state[team_state_key] = renamed_team.strip()
-                            st.rerun()
-                        except ValueError as exc:
-                            st.error(str(exc))
+                    with st.expander("⚙ Opțiuni echipă", expanded=False):
+                        st.markdown("#### Logo-ul echipei")
+                        render_team_logo_editor(team, path, selected_team_name, username,
+                            f"editor_{league_slug}_{safe_slug(selected_team_name)}")
+                        with st.form(f"rename_team_form_{league_slug}_{safe_slug(selected_team_name)}"):
+                            renamed_team = st.text_input("Numele echipei", value=selected_team_name)
+                            save_team_name = st.form_submit_button("Salvează numele echipei")
+                        if save_team_name:
+                            try:
+                                rename_team(data, selected_team_name, renamed_team)
+                                save_league(path, data)
+                                st.session_state[team_state_key] = renamed_team.strip()
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
 
                 st.markdown("#### Lot")
                 render_roster_groups(team, f"open_player_{league_slug}_{safe_slug(selected_team_name)}", player_state_key)
@@ -5254,7 +5275,9 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     if str(match.get("id")) == str(selected_match_id)), None)
                 if selected_history_match is None:
                     st.session_state.pop(history_key, None)
-                    for index, match in enumerate(ordered_matches):
+                    visible_matches = compact_list(ordered_matches,
+                        f"owner_results_{safe_slug(league_key(selected_entry))}")
+                    for index, match in enumerate(visible_matches):
                         render_fixture_card(match, "Încheiat",
                             f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)}")
                         label = (f"Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
