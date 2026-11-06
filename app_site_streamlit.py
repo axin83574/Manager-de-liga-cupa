@@ -5022,12 +5022,11 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 st.session_state.pop("entered_league", None)
                 st.session_state.pop("active_league_picker", None)
                 st.rerun()
-    if is_guest:
-        with st.sidebar:
-            st.divider()
-            if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support_guest_member"):
-                st.session_state["show_global_support"] = True
-                st.rerun()
+    with st.sidebar:
+        st.divider()
+        if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support_bottom"):
+            st.session_state["show_global_support"] = True
+            st.rerun()
 
     if page == "Alegerea mea" and is_guest:
         render_guest_player_choice(data, path, guest_entry["invitation"])
