@@ -12,11 +12,18 @@ import re
 import secrets
 import shutil
 import uuid
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import streamlit as st
 import extra_streamlit_components as stx
 from supabase import create_client
+
+try:
+    import qrcode
+except ImportError:
+    qrcode = None
 
 
 STATS_ECHIPA = {"meciuri_jucate": 0, "goluri_marcate": 0,
@@ -482,6 +489,41 @@ def new_league_access_codes():
     return {"spectator": new_access_code(), "editor": new_access_code()}
 
 
+def league_access_url(code):
+    public_url = str(os.environ.get("APP_PUBLIC_URL", "")).strip()
+    if not public_url:
+        try:
+            public_url = str(st.secrets.get("APP_PUBLIC_URL", "")).strip()
+        except Exception:
+            public_url = ""
+    if not public_url:
+        try:
+            public_url = str(st.context.url or "").strip()
+        except Exception:
+            public_url = ""
+    if not public_url:
+        return ""
+    parts = urlsplit(public_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["cod"] = str(code)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", urlencode(query), ""))
+
+
+def render_league_access_qr(code, label):
+    access_url = league_access_url(code)
+    if not access_url:
+        st.info("Pentru QR pe Streamlit Cloud, setează APP_PUBLIC_URL cu adresa publică a aplicației.")
+        return
+    if qrcode is None:
+        st.info("QR-ul se activează după instalarea dependenței qrcode din requirements.txt.")
+        st.code(access_url, language=None)
+        return
+    buffer = BytesIO()
+    qrcode.make(access_url).save(buffer, format="PNG")
+    st.image(buffer.getvalue(), caption=f"Scanează pentru acces {label}", width=190)
+    st.code(access_url, language=None)
+
+
 def find_access_code(code):
     normalized = normalize_access_code(code)
     if len(normalized) != 12:
@@ -722,11 +764,18 @@ def delete_user_league(username, entry):
 
 def load_league(path):
     if is_db_league_path(path):
+        path_key = str(Path(path).resolve())
+        pending_backups = st.session_state.get("_offline_league_backups", {})
+        if path_key in pending_backups:
+            st.warning("Conexiunea la Supabase este întreruptă. Folosesc copia temporară din această sesiune; păstrează fila deschisă până revine conexiunea.")
+            return normalizeaza_date(copy.deepcopy(pending_backups[path_key]))
         try:
-            result = (supabase_client().table("app_leagues").select("data")
+            result = (supabase_client().table("app_leagues").select("data,updated_at")
                       .eq("id", db_league_id(path)).limit(1).execute().data or [])
             if not result:
                 raise ValueError("Liga nu mai există în baza de date.")
+            revisions = st.session_state.setdefault("_league_revisions", {})
+            revisions[str(Path(path).resolve())] = result[0].get("updated_at")
             return normalizeaza_date(result[0].get("data") or {})
         except ValueError:
             raise
@@ -742,11 +791,36 @@ def load_league(path):
 def _store_league(path, data):
     if is_db_league_path(path):
         payload = normalizeaza_date(data)
-        supabase_client().table("app_leagues").upsert({
+        path_key = str(Path(path).resolve())
+        revisions = st.session_state.setdefault("_league_revisions", {})
+        expected_revision = revisions.get(path_key)
+        updated_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        row = {
             "id": db_league_id(path), "owner_username": path.parent.name,
             "nume": payload.get("nume_liga", "Liga mea"), "data": payload,
-            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        }, on_conflict="id").execute()
+            "updated_at": updated_at,
+        }
+        table = supabase_client().table("app_leagues")
+        try:
+            with st.spinner("Se salvează liga în Supabase…"):
+                if expected_revision:
+                    result = (table.update(row).eq("id", db_league_id(path))
+                              .eq("updated_at", expected_revision)
+                              .select("id,updated_at").execute())
+                    if not result.data:
+                        st.error("Altcineva a modificat liga în același timp. Reîncarcă pagina, verifică ultima versiune și aplică din nou schimbarea.")
+                        st.stop()
+                else:
+                    table.upsert(row, on_conflict="id").execute()
+        except ValueError:
+            raise
+        except Exception as exc:
+            backups = st.session_state.setdefault("_offline_league_backups", {})
+            backups[path_key] = copy.deepcopy(payload)
+            st.warning(f"Supabase nu răspunde. Schimbarea este păstrată temporar în sesiunea aceasta; ține aplicația deschisă și salvează din nou după revenirea conexiunii. ({exc})")
+            return
+        revisions[path_key] = updated_at
+        st.session_state.get("_offline_league_backups", {}).pop(path_key, None)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -944,9 +1018,40 @@ def render_match_history_details(match):
                     detail += f" (assist: {event['asist']})"
                 st.write(detail)
         render_match_player_contributions(match)
-        return
-    if not render_match_player_contributions(match):
+    elif not render_match_player_contributions(match):
         st.caption("Meciul a fost salvat fără evenimente individuale.")
+
+    st.markdown("##### 📲 Rezumat pentru WhatsApp")
+    stage = f"Etapa {match.get('etapa')}: " if match.get("etapa") else ""
+    lines = [f"⚽ {stage}{match.get('e1')} {match.get('goluri_e1', 0)} - {match.get('goluri_e2', 0)} {match.get('e2')}"]
+    event_icons = {"Gol Normal": "⚽", "Gol din Lovitură Liberă": "⚽", "Penalty": "⚽",
+                   "Autogol": "🥅", "Penalty Ratat": "❌", "Cartonaș Galben": "🟨",
+                   "Cartonaș Roșu": "🟥", "Schimbare": "🔄"}
+    for event in events:
+        minute = event.get("afișaj_minut") or f"{event.get('minut', '—')}′"
+        icon = event_icons.get(event.get("tip"), "•")
+        if event.get("tip") == "Schimbare":
+            description = f"{event.get('jucator', '—')} → {event.get('intra', '—')}"
+        else:
+            description = str(event.get("jucator", "—"))
+            if event.get("asist"):
+                description += f" (assist: {event['asist']})"
+        lines.append(f"{icon} {minute} {description} · {event.get('echipa', '')}")
+    votes = match.get("voturi_motm", {})
+    vote_counts = {}
+    if isinstance(votes, dict):
+        for vote in votes.values():
+            if isinstance(vote, dict) and vote.get("jucator"):
+                candidate = (vote.get("echipa", ""), vote["jucator"])
+                vote_counts[candidate] = vote_counts.get(candidate, 0) + 1
+    if vote_counts:
+        top_votes = max(vote_counts.values())
+        leaders = [player for (team, player), count in vote_counts.items() if count == top_votes]
+        lines.append("⭐ Omul meciului: " + (leaders[0] if len(leaders) == 1 else "egalitate între " + ", ".join(leaders)))
+    else:
+        lines.append("⭐ Omul meciului: vot în curs sau nedecis")
+    st.caption("Folosește pictograma de copiere din caseta de mai jos.")
+    st.code("\n".join(lines), language=None)
 
 
 def render_match_event_entry(data, home, away, draft_id, initial_events=None,
@@ -1446,7 +1551,7 @@ def render_award_ballot(data, award, path, username=None, guest_invite=None, wid
         else:
             try:
                 save_award_ballot(path, award["cheie"], choices, username, guest_invite)
-                st.success("Votul a fost salvat. Îl poți modifica până la închiderea votului.")
+                st.toast("Votul a fost salvat. Îl poți modifica până la închiderea votului.", icon="✅")
                 st.rerun()
             except Exception as exc:
                 st.error(f"Nu am putut salva votul: {exc}")
@@ -1626,7 +1731,7 @@ def apply_match(data, match):
     apply_player_stats(data, match["e2"], match.get("mod_e2", {}))
 
 
-def rebuild_stats(data):
+def _rebuild_stats(data):
     for team in data["echipe"].values():
         team.update(STATS_ECHIPA)
         for stats in team["jucatori"].values():
@@ -1656,6 +1761,11 @@ def rebuild_stats(data):
                                      int(adjustments.get(key, 0) or 0))
 
 
+def rebuild_stats(data):
+    with st.spinner("Se recalculează statisticile ligii…"):
+        _rebuild_stats(data)
+
+
 def generate_rounds(teams, home_away=False):
     rotating = list(teams)
     if len(rotating) < 2:
@@ -1682,6 +1792,7 @@ def generate_rounds(teams, home_away=False):
     return [fixture for round_fixtures in rounds for fixture in round_fixtures]
 
 
+@st.cache_data(show_spinner=False, max_entries=32)
 def ranking(data):
     rows = []
     for name, team in data["echipe"].items():
@@ -2501,6 +2612,7 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                     live.setdefault("evenimente", []).append(event)
                     fixture["arbitraj_live"] = live
                     save_referee_state(path, fixture_id, referee_code, live)
+                    st.toast(f"{event_type} înregistrat la minutul {display_minute}.", icon="⚽")
                     st.rerun()
     if live.get("evenimente"):
         st.markdown("#### Evenimente live")
@@ -2513,12 +2625,25 @@ def render_live_arbitration(path, fixture_id, can_edit, referee_code=None):
                 detail += f" · assist {event['asist']}"
             event_col, action_col = st.columns([8, 1])
             event_col.markdown(detail)
-            if can_edit and live.get("faza") != "final" and action_col.button(
-                    "Șterge", key=f"ref_delete_event_{key}_{event_index}", help="Șterge evenimentul introdus greșit"):
-                live["evenimente"].pop(event_index)
-                fixture["arbitraj_live"] = live
-                save_referee_state(path, fixture_id, referee_code, live)
-                st.rerun()
+            if can_edit and live.get("faza") != "final":
+                delete_key = f"ref_delete_event_confirm_{key}_{event_index}"
+                if action_col.button("Șterge", key=f"ref_delete_event_{key}_{event_index}",
+                                     help="Cere confirmare înainte de ștergere"):
+                    st.session_state[delete_key] = True
+                if st.session_state.get(delete_key):
+                    st.warning(f"Ștergi evenimentul {minute} · {event.get('tip')} · {event.get('jucator')}?")
+                    confirm_col, cancel_col = st.columns(2)
+                    if confirm_col.button("Confirmă ștergerea", type="primary", key=f"{delete_key}_yes"):
+                        if event_index < len(live.get("evenimente", [])):
+                            live["evenimente"].pop(event_index)
+                            fixture["arbitraj_live"] = live
+                            save_referee_state(path, fixture_id, referee_code, live)
+                            st.toast("Evenimentul a fost șters.", icon="↩️")
+                        st.session_state.pop(delete_key, None)
+                        st.rerun()
+                    if cancel_col.button("Păstrează", key=f"{delete_key}_no"):
+                        st.session_state.pop(delete_key, None)
+                        st.rerun()
     else:
         st.caption("Evenimentele vor apărea aici în timp real.")
     if can_edit and live.get("faza") == "final" and fixture.get("meci_id"):
@@ -2609,7 +2734,7 @@ def render_owner_arbitration(data, path, league_key_value):
             live = item.get("arbitraj_live", {})
             status = live.get("faza", "programat")
             status_label = "Încheiat" if status == "final" else ("Programat" if status == "programat" else "Live")
-            label = f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')} · {status_label}"
+            label = f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')} · {status_label}{(' · ' + str(item.get('data'))) if item.get('data') else ''}"
             if st.button(label, key=f"open_referee_match_{safe_slug(league_key_value)}_{index}", width="stretch"):
                 st.session_state[selected_key] = str(item.get("id"))
                 st.rerun()
@@ -2886,7 +3011,7 @@ def render_motm_voting(data, match, path, username=None, profile=None,
         team, player = candidate_by_label[selected_label]
         try:
             save_motm_vote(path, match["id"], voter_id, team, player, username, guest_invite)
-            st.success("Votul tău a fost salvat. Îl poți schimba până când meciul este șters.")
+            st.toast("Votul tău a fost salvat. Îl poți schimba până când meciul este șters.", icon="⭐")
             st.rerun()
         except Exception as exc:
             st.error(f"Nu am putut salva votul: {exc}")
@@ -3704,6 +3829,9 @@ def main():
     [data-testid="stAppViewContainer"] { background:var(--bg); color:var(--text); }
     [data-testid="stHeader"] { background:var(--header); }
     [data-testid="stMainBlockContainer"] { max-width:1440px; padding-top:2rem; padding-bottom:4rem; }
+    [data-testid="stMainBlockContainer"] > div { gap:1.25rem; }
+    [data-testid="stMainBlockContainer"] h1 { font-size:clamp(1.85rem,3.2vw,2.65rem); line-height:1.12; }
+    [data-testid="stMainBlockContainer"] h2 { font-size:clamp(1.4rem,2.4vw,1.9rem); line-height:1.2; }
     [data-testid="stSidebar"] { background:var(--sidebar); border-right:1px solid var(--line); }
     [data-testid="stSidebar"] * { color:var(--text); }
     @media (max-width: 700px) {
@@ -3728,8 +3856,9 @@ def main():
     h1 { font-weight:800 !important; }
     h2,h3 { font-weight:750 !important; }
     p, [data-testid="stCaptionContainer"] { color:var(--muted); }
-    [data-testid="stMetric"] { background:var(--paper); border:1px solid var(--line);
-        padding:17px 19px; border-radius:15px; box-shadow:var(--shadow); }
+    [data-testid="stMetric"] { background:linear-gradient(145deg,var(--paper),var(--panel2)); border:1px solid var(--line);
+        padding:17px 19px; border-radius:16px; box-shadow:var(--shadow); transition:transform .16s ease, border-color .16s ease; }
+    [data-testid="stMetric"]:hover { transform:translateY(-2px); border-color:var(--green); }
     .league-table-wrap { width:100%; overflow-x:auto; border:1px solid var(--line);
         border-radius:10px; background:var(--paper); box-shadow:var(--shadow); margin:.35rem 0 1rem; }
     table.league-table { width:100%; border-collapse:collapse; color:var(--text); font-size:.92rem; }
@@ -3743,14 +3872,19 @@ def main():
     .league-table tbody tr:hover { background:var(--pale); }
     [data-testid="stMetricLabel"] { color:var(--muted); font-size:.82rem; }
     [data-testid="stMetricValue"] { color:var(--green-dark); font-family:'Manrope',sans-serif; font-weight:800; }
-    [data-baseweb="tab-list"] { gap:5px; border-bottom:1px solid var(--line);
+    [data-baseweb="tab-list"] { gap:7px; border-bottom:1px solid var(--line);
         flex-wrap:wrap !important; overflow:visible !important; white-space:normal !important; }
     [data-baseweb="tab"] { background:transparent; border-radius:9px 9px 0 0;
-        padding:9px 13px; color:var(--muted); font-weight:600; }
+        padding:10px 15px; color:var(--muted); font-weight:650; transition:background .15s ease,color .15s ease; }
+    [data-baseweb="tab"]:hover { background:var(--hover); }
     [data-baseweb="tab"][aria-selected="true"], .stTabs [aria-selected="true"] { color:var(--green) !important; }
     [data-baseweb="tab-highlight"] { background-color:var(--green) !important; height:3px; }
-    [data-testid="stForm"], [data-testid="stExpander"] { border:1px solid var(--line); border-radius:14px; background:var(--paper); }
-    [data-testid="stVerticalBlockBorderWrapper"] > div { border-color:var(--line) !important; border-radius:16px !important; background:var(--paper); box-shadow:var(--shadow); }
+    [data-testid="stForm"], [data-testid="stExpander"] { border:1px solid var(--line); border-radius:16px; background:var(--paper); }
+    [data-testid="stExpander"] details { border-radius:16px; overflow:hidden; }
+    [data-testid="stExpander"] summary { padding:.8rem 1rem; font-weight:700; }
+    [data-testid="stExpander"] summary:hover { background:var(--hover); }
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding:0 1rem 1rem; }
+    [data-testid="stVerticalBlockBorderWrapper"] > div { border-color:var(--line) !important; border-radius:18px !important; background:var(--paper); box-shadow:var(--shadow); }
     [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
     [data-testid="stDateInput"] input, [data-testid="stSelectbox"] [data-baseweb="select"] > div,
     [data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-color:var(--input-line); border-radius:9px; background:var(--input); color:var(--text); }
@@ -3767,9 +3901,9 @@ def main():
     [data-testid="stAlert"] { color:var(--text); }
     [data-testid="stRadio"] label, [data-testid="stCheckbox"] label,
     [data-testid="stToggle"] label { color:var(--text) !important; }
-    div.stButton > button, div.stFormSubmitButton > button { border-radius:9px;
-        border:1px solid #dce5dc; min-height:42px; font-weight:700; transition:.15s ease; }
-    div.stButton > button:hover, div.stFormSubmitButton > button:hover { border-color:#8aaf96; color:var(--green-dark); transform:translateY(-1px); }
+    div.stButton > button, div.stFormSubmitButton > button { border-radius:11px;
+        border:1px solid var(--line); min-height:44px; font-weight:700; transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease; }
+    div.stButton > button:hover, div.stFormSubmitButton > button:hover { border-color:var(--green); color:var(--green-dark); transform:translateY(-1px); box-shadow:var(--shadow); }
     div.stButton > button[kind="primary"], div.stFormSubmitButton > button[kind="primary"] {
         background:var(--green); border-color:var(--green); color:#fff; box-shadow:0 4px 12px #27674722; }
     div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button[kind="primary"]:hover { background:var(--green-dark); color:#fff; }
@@ -3788,7 +3922,7 @@ def main():
     button[data-testid="stBaseButton-secondary"] { color:var(--text) !important; }
     button[data-testid="stBaseButton-secondary"] * { color:inherit !important; }
     button[data-testid^="stBaseButton-"]:focus-visible { outline:3px solid #83bd94 !important; outline-offset:2px; }
-    [data-testid="stAlert"] { border-radius:12px; }
+    [data-testid="stAlert"] { border-radius:14px; border:1px solid var(--line); }
     [data-testid="stFileUploader"] section { border-radius:12px; border-color:var(--input-line); background:var(--input); color:var(--text); }
     .league-kicker { color:var(--green); text-transform:uppercase; letter-spacing:.14em;
         font-size:.74rem; font-weight:800; margin-bottom:.2rem; }
@@ -3815,7 +3949,11 @@ def main():
         padding:.72rem .95rem; white-space:nowrap; }
     .bike-ad-cta::after { content:'↗'; font-size:1.05rem; }
     @media(max-width:700px) { [data-testid="stMainBlockContainer"] { padding:1.2rem 1rem 3rem; }
-        [data-testid="stMetric"] { padding:13px; } h1 { font-size:1.8rem !important; }
+        [data-testid="stMainBlockContainer"] > div { gap:.85rem; }
+        [data-testid="stMetric"] { padding:13px; border-radius:13px; } h1 { font-size:1.8rem !important; }
+        [data-baseweb="tab"] { padding:8px 10px; font-size:.88rem; }
+        [data-testid="stExpander"] summary { padding:.7rem .8rem; }
+        [data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding:0 .8rem .8rem; }
         a.bike-ad-banner { padding:.8rem; gap:.65rem; border-radius:13px; }
         .bike-ad-left { gap:.65rem; }
         .bike-ad-icon { flex-basis:2.7rem; height:2.7rem; font-size:1.5rem; }
@@ -3871,10 +4009,159 @@ def main():
         button[data-testid="stBaseButton-primary"]:disabled,button[data-testid="stBaseButton-primaryFormSubmit"]:disabled {
           background:#303b34 !important; border-color:#3d4941 !important; color:#9eaaa1 !important; }
         button[data-testid="stBaseButton-primary"]:disabled *,button[data-testid="stBaseButton-primaryFormSubmit"]:disabled * { color:#9eaaa1 !important; }
-        </style>
+        
+
+:root{color-scheme:dark!important;--bg:#0b1220!important;--paper:#111c2c!important;--panel:#111c2c!important;--panel2:#17263a!important;--line:#293a50!important;--text:#edf3fa!important;--muted:#9aabc0!important;--green:#31c477!important;--green-dark:#22a765!important;--pale:#173a32!important;--gold:#f4c66e!important;--sidebar:#0d1726!important;--hover:#1a2b40!important;--selected:#173a32!important;--input:#0d1726!important;--input-line:#344a63!important;--focus:#163b32!important;--disabled:#273343!important;--disabled-text:#a7b5c5!important;--header:rgba(11,18,32,.92)!important;--shadow:0 18px 45px rgba(0,0,0,.24)!important}
+html,body,[class*="css"]{font-family:'DM Sans',sans-serif}
+[data-testid="stAppViewContainer"]{background:radial-gradient(ellipse at 80% -10%,rgba(38,122,101,.17),transparent 38%),radial-gradient(ellipse at 0% 10%,rgba(44,92,145,.15),transparent 33%),#0b1220!important;color:#edf3fa!important}
+[data-testid="stMainBlockContainer"]{max-width:1380px!important;padding-top:2.2rem!important;padding-bottom:4rem!important}
+[data-testid="stMainBlockContainer"]>div{gap:1.1rem!important}
+[data-testid="stHeader"]{background:rgba(11,18,32,.82)!important}
+[data-testid="stSidebar"]{background:linear-gradient(180deg,#0d1726,#101d2e)!important;border-right:1px solid #26374c!important}
+[data-testid="stSidebar"] *{color:#dce7f3!important}
+[data-testid="stSidebar"] [data-testid="stRadio"] label{border:1px solid transparent;border-radius:12px;padding:.68rem .8rem;transition:.18s ease}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover{background:#17263a!important;border-color:#2c425c;transform:translateX(2px)}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked){background:linear-gradient(100deg,#173a32,#173047)!important;border-color:#28624f;color:#69e0a0!important;font-weight:750}
+h1,h2,h3{color:#f3f7fc!important;letter-spacing:-.035em}
+h1{font-size:clamp(2rem,3.4vw,3rem)!important;font-weight:850!important}
+h2{font-size:clamp(1.45rem,2.5vw,2rem)!important;font-weight:800!important}
+p,[data-testid="stCaptionContainer"],[data-testid="stCaptionContainer"] *{color:#a8b8cb!important}
+.league-subtitle{color:#a8b8cb!important;font-size:1.08rem;margin:.25rem 0 1.7rem}
+[data-testid="stMetric"]{background:linear-gradient(145deg,#142237,#101b2b)!important;border:1px solid #2b3e56!important;border-radius:18px!important;padding:1.1rem 1.25rem!important;box-shadow:0 12px 30px rgba(0,0,0,.16)!important;transition:transform .18s,border-color .18s}
+[data-testid="stMetric"]:hover{transform:translateY(-2px);border-color:#31c477!important}
+[data-testid="stMetricLabel"]{color:#9aabc0!important}
+[data-testid="stMetricValue"]{color:#69e0a0!important;font-weight:850!important}
+[data-testid="stVerticalBlockBorderWrapper"]>div,[data-testid="stForm"],[data-testid="stExpander"]{background:linear-gradient(155deg,rgba(20,34,53,.96),rgba(15,26,42,.98))!important;border:1px solid #2a3d55!important;border-radius:18px!important;box-shadow:0 12px 32px rgba(0,0,0,.14)!important}
+[data-testid="stExpander"] details{border-radius:18px!important;overflow:hidden}
+[data-testid="stExpander"] summary{padding:.9rem 1rem!important;font-weight:750!important}
+[data-baseweb="tab-list"]{gap:.5rem!important;border-bottom:1px solid #293a50!important;flex-wrap:wrap!important;overflow:visible!important}
+[data-baseweb="tab"]{background:#111c2c!important;border:1px solid #293a50!important;border-radius:12px 12px 0 0!important;padding:.72rem 1rem!important;color:#a8b8cb!important;font-weight:700!important}
+[data-baseweb="tab"]:hover{background:#17263a!important;color:#edf3fa!important}
+[data-baseweb="tab"][aria-selected="true"]{background:linear-gradient(180deg,#173a32,#111c2c)!important;border-color:#28624f!important;color:#69e0a0!important}
+[data-baseweb="tab-highlight"]{background:#31c477!important;height:3px!important}
+[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,[data-testid="stDateInput"] input,[data-testid="stTextArea"] textarea,[data-testid="stSelectbox"] [data-baseweb="select"]>div,[data-testid="stMultiSelect"] [data-baseweb="select"]>div{background:#0d1726!important;color:#edf3fa!important;border:1px solid #344a63!important;border-radius:11px!important}
+[data-testid="stTextInput"] input:focus,[data-testid="stNumberInput"] input:focus,[data-testid="stTextArea"] textarea:focus{border-color:#31c477!important;box-shadow:0 0 0 3px #31c47725!important}
+div.stButton>button,div.stFormSubmitButton>button{min-height:44px;border-radius:12px!important;border:1px solid #354a62!important;background:#17263a!important;color:#edf3fa!important;font-weight:750!important;transition:transform .16s,box-shadow .16s,border-color .16s}
+div.stButton>button:hover,div.stFormSubmitButton>button:hover{border-color:#31c477!important;color:#fff!important;transform:translateY(-1px);box-shadow:0 8px 22px rgba(0,0,0,.2)!important}
+button[data-testid="stBaseButton-primary"],button[data-testid="stBaseButton-primaryFormSubmit"],div.stButton>button[kind="primary"],div.stFormSubmitButton>button[kind="primary"]{background:linear-gradient(100deg,#22a765,#31c477)!important;border-color:#31c477!important;color:#071910!important;font-weight:850!important;box-shadow:0 7px 18px #31c47727!important}
+button[data-testid="stBaseButton-primary"] *,button[data-testid="stBaseButton-primaryFormSubmit"] *{color:#071910!important}
+/* Stronger selectors override Streamlit's generic button rule. */
+div.stButton > button[data-testid="stBaseButton-primary"],
+div.stFormSubmitButton > button[data-testid="stBaseButton-primaryFormSubmit"],
+div.stButton > button[kind="primary"],
+div.stFormSubmitButton > button[kind="primaryFormSubmit"] {
+  background:#35d687!important;color:#062114!important;border:1px solid #68efad!important;
+  font-weight:850!important;box-shadow:0 5px 18px rgba(53,214,135,.25)!important;
+}
+div.stButton > button[data-testid="stBaseButton-primary"] *,
+div.stFormSubmitButton > button[data-testid="stBaseButton-primaryFormSubmit"] *,
+div.stButton > button[kind="primary"] *,
+div.stFormSubmitButton > button[kind="primaryFormSubmit"] * {color:#062114!important}
+div.stButton > button[data-testid="stBaseButton-primary"]:hover,
+div.stFormSubmitButton > button[data-testid="stBaseButton-primaryFormSubmit"]:hover,
+div.stButton > button[kind="primary"]:hover,
+div.stFormSubmitButton > button[kind="primaryFormSubmit"]:hover {
+  background:#52e99c!important;transform:translateY(-1px);box-shadow:0 8px 22px rgba(53,214,135,.34)!important;
+}
+div.stButton > button:disabled,div.stFormSubmitButton > button:disabled {
+  background:#263343!important;color:#aeb9c7!important;border-color:#3c4b5e!important;
+  opacity:.62!important;cursor:not-allowed!important;box-shadow:none!important;
+}
+div.stButton > button:not(:disabled):not([data-testid="stBaseButton-primary"]),
+div.stFormSubmitButton > button:not(:disabled):not([data-testid="stBaseButton-primaryFormSubmit"]) {
+  background:#263f5a!important;color:#f4f8ff!important;border-color:#6686a9!important;
+}
+div.stButton > button:not(:disabled):not([data-testid="stBaseButton-primary"]):hover,
+div.stFormSubmitButton > button:not(:disabled):not([data-testid="stBaseButton-primaryFormSubmit"]):hover {
+  background:#345575!important;border-color:#91b8df!important;color:#fff!important;
+}
+[data-testid="stAlert"]{border-radius:14px!important;background:#142237!important;border:1px solid #2b3e56!important;overflow:hidden}[data-testid="stAlert"]>div{background:#142237!important;color:#edf3fa!important}[data-testid="stAlert"]>div>div{background:transparent!important;color:inherit!important}[data-testid="stAlert"] [data-testid="stMarkdownContainer"] *{color:#edf3fa!important}
+[data-testid="stDataFrame"],[data-testid="stTable"]{border:1px solid #2b3e56!important;border-radius:14px;overflow:hidden}
+a{color:#69e0a0!important}
+[class*="st-key-open_history_match_"] div.stButton > button,
+[class*="st-key-program_choose_lineup_"] div.stButton > button,
+[class*="st-key-program_choose_result_"] div.stButton > button,
+[class*="st-key-open_referee_match_"] div.stButton > button,
+[class*="st-key-open_live_match_"] div.stButton > button,
+[class*="st-key-viewer_open_match_"] div.stButton > button {
+  display:flex;align-items:center;justify-content:flex-start;text-align:left;
+  min-height:58px;padding:.82rem 1rem!important;
+  background:linear-gradient(115deg,#254565,#1b3048)!important;color:#f5f9ff!important;
+  border:1px solid #577da2!important;border-left:4px solid #42dc91!important;border-radius:14px!important;
+  box-shadow:0 5px 16px rgba(0,0,0,.18)!important;cursor:pointer!important;
+}
+[class*="st-key-open_team_"] div.stButton > button,
+[class*="st-key-viewer_open_team_"] div.stButton > button {
+  display:flex;align-items:center;justify-content:flex-start;text-align:left;
+  min-height:64px;padding:.85rem 1rem!important;
+  background:linear-gradient(115deg,#254565,#1b3048)!important;color:#f5f9ff!important;
+  border:1px solid #577da2!important;border-left:4px solid #62baff!important;border-radius:14px!important;
+  box-shadow:0 5px 16px rgba(0,0,0,.18)!important;cursor:pointer!important;
+}
+[class*="st-key-open_player_"] div.stButton > button,
+[class*="st-key-viewer_open_player_"] div.stButton > button {
+  display:flex;align-items:center;justify-content:flex-start;text-align:left;
+  min-height:54px;padding:.75rem 1rem!important;
+  background:linear-gradient(115deg,#303c61,#222c49)!important;color:#f8f7ff!important;
+  border:1px solid #756bb2!important;border-left:4px solid #aa9bff!important;border-radius:14px!important;
+  box-shadow:0 5px 16px rgba(0,0,0,.18)!important;cursor:pointer!important;
+}
+/* Card buttons outrank the generic secondary-button rule. */
+[class*="st-key-open_history_match_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-program_choose_lineup_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-program_choose_result_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-open_referee_match_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-open_live_match_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-viewer_open_match_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-open_team_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-viewer_open_team_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-open_player_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
+[class*="st-key-viewer_open_player_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled) {
+  background:linear-gradient(115deg,#254565,#1b3048)!important;color:#f5f9ff!important;
+  border-color:#668bb0!important;box-shadow:0 5px 16px rgba(0,0,0,.2)!important;
+}
+[class*="st-key-open_history_match_"] div.stButton > button > div,
+[class*="st-key-program_choose_lineup_"] div.stButton > button > div,
+[class*="st-key-program_choose_result_"] div.stButton > button > div,
+[class*="st-key-open_referee_match_"] div.stButton > button > div,
+[class*="st-key-open_live_match_"] div.stButton > button > div,
+[class*="st-key-viewer_open_match_"] div.stButton > button > div,
+[class*="st-key-open_team_"] div.stButton > button > div,
+[class*="st-key-viewer_open_team_"] div.stButton > button > div,
+[class*="st-key-open_player_"] div.stButton > button > div,
+[class*="st-key-viewer_open_player_"] div.stButton > button > div {justify-content:flex-start!important}
+[class*="st-key-open_history_match_"] div.stButton > button:hover,
+[class*="st-key-program_choose_lineup_"] div.stButton > button:hover,
+[class*="st-key-program_choose_result_"] div.stButton > button:hover,
+[class*="st-key-open_referee_match_"] div.stButton > button:hover,
+[class*="st-key-open_live_match_"] div.stButton > button:hover,
+[class*="st-key-viewer_open_match_"] div.stButton > button:hover,
+[class*="st-key-open_team_"] div.stButton > button:hover,
+[class*="st-key-viewer_open_team_"] div.stButton > button:hover,
+[class*="st-key-open_player_"] div.stButton > button:hover,
+[class*="st-key-viewer_open_player_"] div.stButton > button:hover { transform:translateY(-2px);filter:brightness(1.15);box-shadow:0 9px 22px rgba(0,0,0,.28)!important; }
+.bike-ad-wrap{margin-bottom:1.4rem!important}
+a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,.22)!important}
+@media(max-width:767px){
+ [data-testid="stMainBlockContainer"]{padding:1rem .75rem 3rem!important}
+ [data-testid="stHorizontalBlock"]{flex-direction:column!important;align-items:stretch!important;gap:.65rem!important}
+ [data-testid="stHorizontalBlock"]>[data-testid="column"]{width:100%!important;min-width:100%!important;flex:1 1 100%!important}
+ div.stButton>button,div.stFormSubmitButton>button{width:100%!important;min-height:48px!important}
+ [data-testid="stDataFrame"],[data-testid="stTable"]{max-width:100%!important;overflow-x:auto!important}
+ [data-testid="stMetric"]{padding:.8rem!important;border-radius:14px!important}
+ h1{font-size:1.7rem!important}
+ [data-baseweb="tab-list"]{gap:.35rem!important;flex-wrap:wrap!important}
+ [data-baseweb="tab"]{padding:.55rem .65rem!important;font-size:.82rem!important}
+ [data-testid="stSidebar"]{width:min(16rem,65vw)!important;min-width:min(16rem,65vw)!important;max-width:65vw!important}
+ a.bike-ad-banner{padding:.8rem!important;gap:.65rem!important}
+ .lineup-pitch{width:100%;overflow:hidden}
+}
+
+</style>
         """, unsafe_allow_html=True)
     st.markdown('''
-    <div class="bike-ad-wrap">
+
+        <div class="bike-ad-wrap">
       <a class="bike-ad-banner" href="https://event.2performant.com/events/click?ad_type=quicklink&amp;aff_code=7067ba403&amp;unique=6e0b0b0df&amp;redirect_to=https%3A%2F%2Fpiese-biciclete.eu%2F" target="_blank" rel="sponsored noopener noreferrer" aria-label="Vizitează magazinul Piese-Biciclete.eu — link afiliat">
         <span class="bike-ad-left">
           <span class="bike-ad-icon" aria-hidden="true">🚲</span>
@@ -4343,6 +4630,11 @@ def main():
             selected_team_name = None
 
         if not selected_team_name:
+            roster_summary = st.columns(3)
+            roster_summary[0].metric("Echipe", len(data.get("echipe", {})))
+            roster_summary[1].metric("Jucători", sum(len(team.get("jucatori", {}))
+                for team in data.get("echipe", {}).values()))
+            roster_summary[2].metric("Meciuri", len(data.get("istoric_meciuri", [])))
             st.markdown("#### Echipe")
             if data.get("echipe"):
                 team_names = list(data["echipe"])
@@ -4508,6 +4800,13 @@ def main():
                             st.rerun()
 
     if page == "Meciuri și program":
+        match_summary = st.columns(3)
+        match_summary[0].metric("Rezultate", len(data.get("istoric_meciuri", [])))
+        match_summary[1].metric("Programate", len(pending_fixtures(data)))
+        live_count = sum(1 for fixture in data.get("program", [])
+            if fixture.get("arbitraj_live", {}).get("faza", "programat") not in {"programat", "final"})
+        match_summary[2].metric("Live acum", live_count)
+
         match_tabs = st.tabs(["Rezultate", "Program", "Live"])
         with match_tabs[0]:
             if data["istoric_meciuri"]:
@@ -4623,7 +4922,7 @@ def main():
                     if fixtures:
                         st.caption("Apasă pe meciul pentru care vrei să alegi formațiile și titularii.")
                         for index, fixture in enumerate(ordered_by_stage(fixtures)):
-                            label = f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"
+                            label = f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}{(' · ' + str(fixture.get('data'))) if fixture.get('data') else ''}"
                             if st.button(label, key=f"program_choose_lineup_{safe_slug(league_key(selected_entry))}_{index}", width="stretch"):
                                 st.session_state[lineup_key] = str(fixture.get("id"))
                                 st.rerun()
@@ -4680,7 +4979,7 @@ def main():
                     st.session_state.pop(record_key, None)
                     st.caption("Apasă pe meciul pentru care vrei să înregistrezi rezultatul.")
                     for index, fixture in enumerate(ordered_by_stage(playable)):
-                        label = f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"
+                        label = f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}{(' · ' + str(fixture.get('data'))) if fixture.get('data') else ''}"
                         if st.button(label, key=f"program_choose_result_{safe_slug(league_key(selected_entry))}_{index}", width="stretch"):
                             st.session_state[record_key] = str(fixture.get("id"))
                             st.rerun()
@@ -5282,6 +5581,7 @@ def main():
                             st.markdown(f"### {title}")
                             st.code(codes[code_type], language=None)
                             st.caption(description)
+                            render_league_access_qr(codes[code_type], code_type)
                             if st.button("Generează cod nou", key=f"rotate_{code_type}"):
                                 data["coduri_invitat"][code_type] = new_access_code()
                                 save_league(path, data)
