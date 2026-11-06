@@ -1895,7 +1895,10 @@ def render_roster_groups(team, widget_prefix, selection_key=None):
         st.markdown(f"##### {group_name}")
         for index, (player_name, stats) in enumerate(players):
             number = str(stats.get("numar", "")).strip()
-            button_label = f"#{number} · {player_name}" if number else player_name
+            shirt = f"#{number} · " if number else ""
+            button_label = (f"{shirt}{player_name} · ⚽{stats.get('goluri', 0)} "
+                f"A{stats.get('asisturi', 0)} 🟨{stats.get('cartonase_galbene', 0)} "
+                f"🟥{stats.get('cartonase_rosii', 0)}")
             if selection_key:
                 if st.button(button_label,
                     key=f"{widget_prefix}_{safe_slug(player_name)}_{index}", width="stretch"):
@@ -1903,9 +1906,6 @@ def render_roster_groups(team, widget_prefix, selection_key=None):
                     st.rerun()
             else:
                 st.markdown(f"**{button_label}**")
-            st.caption(f"{stats.get('pozitie') or 'Poziție nespecificată'} · "
-                f"⚽ {stats.get('goluri', 0)} goluri · {stats.get('asisturi', 0)} assisturi · "
-                f"🟨 {stats.get('cartonase_galbene', 0)} · 🟥 {stats.get('cartonase_rosii', 0)}")
     if not any_players:
         st.info("Lotul echipei este gol.")
 
@@ -1969,39 +1969,6 @@ def compact_list(records, widget_key, page_size=10):
         st.session_state[expanded_key] = not expanded
         st.rerun()
     return records if expanded else records[:page_size]
-
-
-def render_fixture_card(fixture, status="Programat", score=None):
-    home, away = str(fixture.get("e1", "Gazde")), str(fixture.get("e2", "Oaspeți"))
-    with st.container(border=True):
-        home_col, center_col, away_col = st.columns([1, .8, 1])
-        home_col.markdown(f"**{html.escape(home)}**")
-        if score is None:
-            badge = "🟢" if status == "Live" else "🕒"
-            center_col.markdown(f"{badge} **{html.escape(status)}**")
-        else:
-            center_col.markdown(f"**{score}**")
-            center_col.caption("✅ Încheiat" if status == "Încheiat" else f"🟢 {status}")
-        away_col.markdown(f"**{html.escape(away)}**")
-        details = []
-        if fixture.get("data") or fixture.get("ora"):
-            details.append("🕒 " + " · ".join(str(fixture[key]) for key in ("data", "ora") if fixture.get(key)))
-        if fixture.get("teren") or fixture.get("locatie"):
-            details.append(f"📍 {fixture.get('teren') or fixture.get('locatie')}")
-        details.append(f"Etapa {fixture.get('etapa') or '—'}")
-        st.caption(" · ".join(details))
-
-
-def render_schedule_card(data, fixture):
-    phase = fixture.get("arbitraj_live", {}).get("faza", "programat")
-    if phase == "final":
-        goals_home, goals_away = _live_match_score(data, fixture, fixture.get("arbitraj_live", {}))
-        render_fixture_card(fixture, "Încheiat", f"{goals_home}–{goals_away}")
-    elif phase != "programat":
-        goals_home, goals_away = _live_match_score(data, fixture, fixture.get("arbitraj_live", {}))
-        render_fixture_card(fixture, "Live", f"{goals_home}–{goals_away}")
-    else:
-        render_fixture_card(fixture, "Programat")
 
 
 def pending_fixtures(data):
@@ -3039,10 +3006,13 @@ def render_owner_arbitration(data, path, league_key_value):
             status_label = "Încheiat" if status == "final" else ("Programat" if status == "programat" else "Live")
             if status_label == "Live":
                 score_home, score_away = _live_match_score(data, item, live)
-                render_fixture_card(item, "Live", f"{score_home}–{score_away}")
+                status_label = f"🟢 Live · {score_home}–{score_away}"
             else:
-                render_fixture_card(item, status_label)
-            label = f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')} · {status_label}{(' · ' + str(item.get('data'))) if item.get('data') else ''}"
+                status_label = "✅ Încheiat" if status == "final" else "🕒 Programat"
+            details = " · ".join(str(item[key]) for key in ("data", "ora") if item.get(key))
+            label = f"Etapa {item.get('etapa') or '—'} · {item.get('e1')} – {item.get('e2')} · {status_label}"
+            if details:
+                label += f" · {details}"
             if st.button(label, key=f"open_referee_match_{safe_slug(league_key_value)}_{index}", width="stretch"):
                 st.session_state[selected_key] = str(item.get("id"))
                 st.rerun()
@@ -3521,9 +3491,7 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                     visible_matches = compact_list(ordered_matches,
                         f"viewer_results_{safe_slug(league_key(entry))}")
                     for index, match in enumerate(visible_matches):
-                        render_fixture_card(match, "Încheiat",
-                            f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)}")
-                        label = (f"Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
+                        label = (f"✅ Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
                                  f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}")
                         if st.button(label, key=f"viewer_open_match_{safe_slug(league_key(entry))}_{index}",
                                      width="stretch"):
@@ -3548,8 +3516,11 @@ def render_view_only(data, username, profile, entry, guest_invite=None, guest_pr
                 st.caption("Apasă pe un meci ca să vezi echipele de start și formațiile salvate.")
                 fixtures = filter_by_stage(fixtures, f"viewer_program_stage_{safe_slug(league_key(entry))}")
                 for fixture_index, fixture in enumerate(fixtures):
-                    render_schedule_card(data, fixture)
-                    with st.expander(f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"):
+                    details = " · ".join(str(fixture[key]) for key in ("data", "ora") if fixture.get(key))
+                    fixture_label = f"🕒 Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"
+                    if details:
+                        fixture_label += f" · {details}"
+                    with st.expander(fixture_label, expanded=False):
                         live = fixture.get("arbitraj_live", {})
                         starting_lineups = live.get("echipe_start", {})
                         if starting_lineups:
@@ -4484,15 +4455,15 @@ a{color:#69e0a0!important}
 [class*="st-key-open_live_match_"] div.stButton > button,
 [class*="st-key-viewer_open_match_"] div.stButton > button {
   display:flex;align-items:center;justify-content:flex-start;text-align:left;
-  min-height:58px;padding:.82rem 1rem!important;
-  background:linear-gradient(115deg,#254565,#1b3048)!important;color:#f5f9ff!important;
-  border:1px solid #577da2!important;border-left:4px solid #42dc91!important;border-radius:14px!important;
-  box-shadow:0 5px 16px rgba(0,0,0,.18)!important;cursor:pointer!important;
+  min-height:44px!important;padding:.48rem .75rem!important;font-size:.9rem!important;
+  background:#192a3e!important;color:#f5f9ff!important;
+  border:1px solid #3d5873!important;border-left:3px solid #42dc91!important;border-radius:10px!important;
+  box-shadow:none!important;cursor:pointer!important;
 }
 [class*="st-key-open_team_"] div.stButton > button,
 [class*="st-key-viewer_open_team_"] div.stButton > button {
   display:flex;align-items:center;justify-content:flex-start;text-align:left;
-  min-height:64px;padding:.85rem 1rem!important;
+  min-height:48px!important;padding:.52rem .75rem!important;
   background:linear-gradient(115deg,#254565,#1b3048)!important;color:#f5f9ff!important;
   border:1px solid #577da2!important;border-left:4px solid #62baff!important;border-radius:14px!important;
   box-shadow:0 5px 16px rgba(0,0,0,.18)!important;cursor:pointer!important;
@@ -4500,10 +4471,10 @@ a{color:#69e0a0!important}
 [class*="st-key-open_player_"] div.stButton > button,
 [class*="st-key-viewer_open_player_"] div.stButton > button {
   display:flex;align-items:center;justify-content:flex-start;text-align:left;
-  min-height:54px;padding:.75rem 1rem!important;
-  background:linear-gradient(115deg,#303c61,#222c49)!important;color:#f8f7ff!important;
-  border:1px solid #756bb2!important;border-left:4px solid #aa9bff!important;border-radius:14px!important;
-  box-shadow:0 5px 16px rgba(0,0,0,.18)!important;cursor:pointer!important;
+  min-height:42px!important;padding:.42rem .68rem!important;font-size:.82rem!important;
+  background:#202a42!important;color:#f8f7ff!important;
+  border:1px solid #4c5372!important;border-left:3px solid #8c82d8!important;border-radius:9px!important;
+  box-shadow:none!important;cursor:pointer!important;
 }
 /* Card buttons outrank the generic secondary-button rule. */
 [class*="st-key-open_history_match_"] div.stButton > button[data-testid="stBaseButton-secondary"]:not(:disabled),
@@ -5278,9 +5249,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     visible_matches = compact_list(ordered_matches,
                         f"owner_results_{safe_slug(league_key(selected_entry))}")
                     for index, match in enumerate(visible_matches):
-                        render_fixture_card(match, "Încheiat",
-                            f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)}")
-                        label = (f"Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
+                        label = (f"✅ Etapa {match.get('etapa') or '—'} · {match.get('e1')} "
                                  f"{match.get('goluri_e1', 0)}–{match.get('goluri_e2', 0)} {match.get('e2')}")
                         if st.button(label, key=f"open_history_match_{safe_slug(league_key(selected_entry))}_{index}",
                                      width="stretch"):
@@ -5387,8 +5356,10 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     if fixtures:
                         st.caption("Apasă pe meciul pentru care vrei să alegi formațiile și titularii.")
                         for index, fixture in enumerate(stage_fixtures):
-                            render_schedule_card(data, fixture)
-                            label = f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}{(' · ' + str(fixture.get('data'))) if fixture.get('data') else ''}"
+                            details = " · ".join(str(fixture[key]) for key in ("data", "ora") if fixture.get(key))
+                            label = f"🕒 Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"
+                            if details:
+                                label += f" · {details}"
                             if st.button(label, key=f"program_choose_lineup_{safe_slug(league_key(selected_entry))}_{index}", width="stretch"):
                                 st.session_state[lineup_key] = str(fixture.get("id"))
                                 st.rerun()
@@ -5482,8 +5453,10 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     st.session_state.pop(record_key, None)
                     st.caption("Apasă pe meciul pentru care vrei să înregistrezi rezultatul.")
                     for index, fixture in enumerate(playable):
-                        render_schedule_card(data, fixture)
-                        label = f"Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}{(' · ' + str(fixture.get('data'))) if fixture.get('data') else ''}"
+                        details = " · ".join(str(fixture[key]) for key in ("data", "ora") if fixture.get(key))
+                        label = f"🕒 Etapa {fixture.get('etapa') or '—'} · {fixture.get('e1')} – {fixture.get('e2')}"
+                        if details:
+                            label += f" · {details}"
                         if st.button(label, key=f"program_choose_result_{safe_slug(league_key(selected_entry))}_{index}", width="stretch"):
                             st.session_state[record_key] = str(fixture.get("id"))
                             st.rerun()
