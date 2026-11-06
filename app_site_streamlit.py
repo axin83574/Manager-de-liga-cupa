@@ -61,6 +61,11 @@ def tr(text):
     return str(text)
 
 
+def _sidebar_navigation_changed(widget_key, other_key, other_default):
+    st.session_state["main_navigation"] = st.session_state[widget_key]
+    st.session_state[other_key] = other_default
+
+
 BASE_DIR = Path(os.environ.get("LIGA_DATA_DIR", Path(__file__).resolve().parent / "ligi"))
 APP_DIR = Path(__file__).resolve().parent
 USERS_FILE = Path(os.environ.get("LIGA_USERS_FILE", APP_DIR / "utilizatori.json"))
@@ -767,19 +772,34 @@ def load_league(path):
         path_key = str(Path(path).resolve())
         pending_backups = st.session_state.get("_offline_league_backups", {})
         if path_key in pending_backups:
-            st.warning("Conexiunea la Supabase este întreruptă. Folosesc copia temporară din această sesiune; păstrează fila deschisă până revine conexiunea.")
-            return normalizeaza_date(copy.deepcopy(pending_backups[path_key]))
+            warnings = st.session_state.setdefault("_offline_league_warnings", set())
+            if path_key not in warnings:
+                st.warning("Supabase nu răspunde. Panourile folosesc ultima copie disponibilă în această sesiune; păstrează fila deschisă până revine conexiunea.")
+                warnings.add(path_key)
+            snapshot = copy.deepcopy(pending_backups[path_key])
+            st.session_state.setdefault("_league_snapshots", {})[path_key] = copy.deepcopy(snapshot)
+            return normalizeaza_date(snapshot)
         try:
             result = (supabase_client().table("app_leagues").select("data,updated_at")
                       .eq("id", db_league_id(path)).limit(1).execute().data or [])
             if not result:
                 raise ValueError("Liga nu mai există în baza de date.")
             revisions = st.session_state.setdefault("_league_revisions", {})
-            revisions[str(Path(path).resolve())] = result[0].get("updated_at")
-            return normalizeaza_date(result[0].get("data") or {})
+            revisions[path_key] = result[0].get("updated_at")
+            snapshot = normalizeaza_date(result[0].get("data") or {})
+            st.session_state.setdefault("_league_snapshots", {})[path_key] = copy.deepcopy(snapshot)
+            st.session_state.get("_offline_league_warnings", set()).discard(path_key)
+            return snapshot
         except ValueError:
             raise
         except Exception as exc:
+            snapshots = st.session_state.get("_league_snapshots", {})
+            if path_key in snapshots:
+                warnings = st.session_state.setdefault("_offline_league_warnings", set())
+                if path_key not in warnings:
+                    st.warning("Conexiunea la Supabase a căzut. Afișez ultima copie încărcată; panourile rămân disponibile, iar modificările se păstrează temporar în sesiunea deschisă.")
+                    warnings.add(path_key)
+                return normalizeaza_date(copy.deepcopy(snapshots[path_key]))
             raise ValueError(f"Nu pot citi liga din Supabase: {exc}") from exc
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -821,6 +841,8 @@ def _store_league(path, data):
             return
         revisions[path_key] = updated_at
         st.session_state.get("_offline_league_backups", {}).pop(path_key, None)
+        st.session_state.setdefault("_league_snapshots", {})[path_key] = copy.deepcopy(payload)
+        st.session_state.get("_offline_league_warnings", set()).discard(path_key)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -3091,6 +3113,38 @@ def render_motm_voting(data, match, path, username=None, profile=None,
             st.error(f"Nu am putut salva votul: {exc}")
 
 
+def render_motm_vote_reset(path, match, role, scope):
+    if role not in {"owner", "editor"}:
+        return
+    votes = match.get("voturi_motm", {})
+    if not isinstance(votes, dict) or not votes:
+        return
+    confirm_key = f"confirm_reset_motm_{safe_slug(str(scope))}"
+    if st.button("↺ Resetează voturile MOTM", key=f"reset_motm_{safe_slug(str(scope))}"):
+        st.session_state[confirm_key] = True
+    if not st.session_state.get(confirm_key):
+        return
+    st.warning(f"Se vor șterge toate cele {len(votes)} voturi pentru omul meciului. Votul poate fi reluat după resetare.")
+    confirm_col, cancel_col = st.columns(2)
+    if confirm_col.button("Confirmă resetarea voturilor", type="primary", key=f"{confirm_key}_yes"):
+        try:
+            fresh = load_league(path)
+            target = next((item for item in _match_records(fresh)
+                           if str(item.get("id")) == str(match.get("id"))), None)
+            if not target:
+                raise ValueError("Meciul nu mai există în ligă.")
+            target.pop("voturi_motm", None)
+            save_league(path, fresh)
+            st.session_state.pop(confirm_key, None)
+            st.toast("Voturile MOTM au fost resetate.", icon="↺")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Nu am putut reseta voturile: {exc}")
+    if cancel_col.button("Păstrează voturile", key=f"{confirm_key}_no"):
+        st.session_state.pop(confirm_key, None)
+        st.rerun()
+
+
 def render_view_only(data, username, profile, entry, guest_invite=None, guest_profile=None):
     st.info("Acces de vizualizare · nu poți modifica această ligă.")
     if username:
@@ -4553,8 +4607,28 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
     }
     if st.session_state.get("main_navigation") not in pages:
         st.session_state["main_navigation"] = pages[0]
-    page = st.sidebar.radio(tr("Navigare"), pages,
-        format_func=lambda item: navigation_labels[item].replace(item, tr(item)), key="main_navigation")
+    admin_pages = ["Arbitraj", "Transferuri", "Membri", "Import / export", "Setări ligă"]
+    public_pages = [item for item in pages if item not in admin_pages]
+    public_default = st.session_state["main_navigation"] if st.session_state["main_navigation"] in public_pages else public_pages[0]
+    admin_default = st.session_state["main_navigation"] if st.session_state["main_navigation"] in admin_pages else admin_pages[0]
+    if st.session_state.get("main_navigation") in public_pages:
+        st.session_state["sidebar_admin_navigation"] = admin_default
+        st.session_state.setdefault("sidebar_public_navigation", public_default)
+    else:
+        st.session_state["sidebar_public_navigation"] = public_default
+        st.session_state.setdefault("sidebar_admin_navigation", admin_default)
+    st.sidebar.radio("Navigare", public_pages,
+        format_func=lambda item: navigation_labels[item].replace(item, tr(item)),
+        key="sidebar_public_navigation", on_change=_sidebar_navigation_changed,
+        args=("sidebar_public_navigation", "sidebar_admin_navigation", admin_pages[0]))
+    with st.sidebar:
+        st.divider()
+        st.markdown("### 🛠️ Administrare")
+        st.radio("Instrumente administrative", admin_pages,
+            format_func=lambda item: navigation_labels[item].replace(item, tr(item)),
+            key="sidebar_admin_navigation", on_change=_sidebar_navigation_changed,
+            args=("sidebar_admin_navigation", "sidebar_public_navigation", public_pages[0]))
+    page = st.session_state.get("main_navigation", public_pages[0])
     if not is_guest:
         with st.sidebar:
             st.divider()
@@ -4942,6 +5016,8 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                         st.markdown("##### ⭐ Votează omul meciului")
                         render_motm_voting(data, selected_history_match, path, username, profile,
                             widget_key=f"league-{league_key(selected_entry)}-{selected_history_match.get('id')}")
+                        render_motm_vote_reset(path, selected_history_match, role,
+                            f"{league_key(selected_entry)}-{selected_history_match.get('id')}")
                     match_to_edit = selected_history_match
                     with st.expander("Editează un rezultat"):
                         teams_for_edit = list(data["echipe"])
@@ -5049,10 +5125,30 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                         with st.form("gen_program"):
                             twice = st.checkbox("Tur și retur")
                             make_schedule = st.form_submit_button("Generează programul")
+                        schedule_confirm_key = f"confirm_generate_program_{safe_slug(league_key(selected_entry))}"
                         if make_schedule:
-                            data["program"] = generate_rounds(list(data["echipe"]), twice)
-                            save_league(path, data)
-                            st.rerun()
+                            if data.get("program"):
+                                st.session_state[schedule_confirm_key] = True
+                                st.session_state[f"{schedule_confirm_key}_twice"] = bool(twice)
+                            else:
+                                data["program"] = generate_rounds(list(data["echipe"]), twice)
+                                save_league(path, data)
+                                st.rerun()
+                        if st.session_state.get(schedule_confirm_key):
+                            st.warning("Există deja un program. Generarea îl va înlocui și va elimina legăturile cu etapele/meciurile live curente; rezultatele deja înregistrate în istoric rămân.")
+                            confirm_col, cancel_col = st.columns(2)
+                            if confirm_col.button("Confirmă înlocuirea programului", type="primary",
+                                                  key=f"{schedule_confirm_key}_yes"):
+                                twice_choice = bool(st.session_state.get(f"{schedule_confirm_key}_twice", False))
+                                data["program"] = generate_rounds(list(data["echipe"]), twice_choice)
+                                save_league(path, data)
+                                st.session_state.pop(schedule_confirm_key, None)
+                                st.session_state.pop(f"{schedule_confirm_key}_twice", None)
+                                st.rerun()
+                            if cancel_col.button("Păstrează programul", key=f"{schedule_confirm_key}_no"):
+                                st.session_state.pop(schedule_confirm_key, None)
+                                st.session_state.pop(f"{schedule_confirm_key}_twice", None)
+                                st.rerun()
                         with st.form("fixture_manual"):
                             fc1, fc2, fc3, fc4 = st.columns([1, 2, 2, 2])
                             stage = fc1.number_input("Etapa", min_value=1, step=1, key="manual_stage")
@@ -5070,10 +5166,22 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                                 save_league(path, data)
                                 st.success("Meciul a fost adăugat în program.")
                                 st.rerun()
-                    if data.get("program") and st.button("Șterge programul", key=f"clear_program_{safe_slug(league_key(selected_entry))}"):
-                        data["program"] = []
-                        save_league(path, data)
-                        st.rerun()
+                    if data.get("program"):
+                        clear_program_key = f"confirm_clear_program_{safe_slug(league_key(selected_entry))}"
+                        if st.button("Șterge programul", key=f"clear_program_{safe_slug(league_key(selected_entry))}"):
+                            st.session_state[clear_program_key] = True
+                        if st.session_state.get(clear_program_key):
+                            st.warning("Programul, echipele de start și datele de arbitraj live asociate vor fi șterse. Rezultatele deja salvate în istoric rămân.")
+                            confirm_col, cancel_col = st.columns(2)
+                            if confirm_col.button("Confirmă ștergerea programului", type="primary",
+                                                  key=f"{clear_program_key}_yes"):
+                                data["program"] = []
+                                save_league(path, data)
+                                st.session_state.pop(clear_program_key, None)
+                                st.rerun()
+                            if cancel_col.button("Păstrează programul", key=f"{clear_program_key}_no"):
+                                st.session_state.pop(clear_program_key, None)
+                                st.rerun()
 
             with record_section:
                 playable = [fixture for fixture in fixtures
