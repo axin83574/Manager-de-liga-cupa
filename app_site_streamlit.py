@@ -121,6 +121,10 @@ def all_db_league_rows():
 
 def normalizeaza_date(data):
     data.setdefault("nume_liga", "Liga mea")
+    # Older saved competitions predate the type selector and used all sections.
+    data.setdefault("tip_competitie", "Liga + cupă")
+    if data.get("tip_competitie") not in {"Ligă", "Cupă", "Ligă + cupă"}:
+        data["tip_competitie"] = "Liga + cupă"
     settings = data.get("setari_liga")
     if not isinstance(settings, dict):
         settings = {}
@@ -779,7 +783,8 @@ def create_user_league(username, name, source_entry=None, league_type="Ligă"):
                        **STATS_ECHIPA}
                 for team, info in source_data.get("echipe", {}).items()
             }
-        created_data = {"nume_liga": name.strip() or "Liga mea", "echipe": copied_teams,
+        created_data = {"nume_liga": name.strip() or "Liga mea", "tip_competitie": league_type,
+                        "echipe": copied_teams,
                         "istoric_meciuri": [], "program": [], "transferuri": [], "cupe": [], "membri": [],
                         "coduri_invitat": new_league_access_codes()}
         if league_type in ("Ligă + cupă", "Cupă"):
@@ -807,7 +812,8 @@ def create_user_league(username, name, source_entry=None, league_type="Ligă"):
                    **STATS_ECHIPA}
             for team, info in source_data.get("echipe", {}).items()
         }
-    created_data = {"nume_liga": name.strip() or "Liga mea", "echipe": copied_teams,
+    created_data = {"nume_liga": name.strip() or "Liga mea", "tip_competitie": league_type,
+                    "echipe": copied_teams,
                     "istoric_meciuri": [], "program": [], "transferuri": [], "cupe": [], "membri": [],
                     "coduri_invitat": new_league_access_codes()}
     if league_type in ("Ligă + cupă", "Cupă"):
@@ -4944,6 +4950,13 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
         return
     pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Arbitraj", "Cupa",
             "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export", "Setări ligă"]
+    competition_type = data.get("tip_competitie", "Liga + cupă")
+    if competition_type == "Ligă":
+        pages = [page_name for page_name in pages if page_name not in ("Cupa", "Supercupa")]
+    elif competition_type == "Cupă":
+        # Cup-only competitions have no league table, awards, transfers or supercup.
+        pages = [page_name for page_name in pages if page_name not in
+                 ("Clasament", "Statistici", "Supercupa", "Premii sezon", "Transferuri")]
     if is_guest and guest_entry.get("access_method") == "legacy" and guest_entry["invitation"].get("tip") == "jucator":
         pages.insert(-1, "Alegerea mea")
     navigation_labels = {
