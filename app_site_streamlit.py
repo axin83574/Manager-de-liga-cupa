@@ -4351,8 +4351,12 @@ def auth_view(cookie_manager):
 
 
 def main():
-    st.set_page_config(page_title="GolStat", page_icon="⚽", layout="wide",
+    logo_path = APP_DIR / "golstat_logo.png"
+    page_icon = str(logo_path) if logo_path.is_file() else "⚽"
+    st.set_page_config(page_title="GolStat", page_icon=page_icon, layout="wide",
                        initial_sidebar_state="auto")
+    if logo_path.is_file():
+        st.logo(str(logo_path), size="large")
     cookie_manager = stx.CookieManager(key="persistent_cookie_manager")
     # Tema este fixată pe întunecat pentru a evita diferențele de contrast
     # dintre componentele Streamlit și stilurile personalizate.

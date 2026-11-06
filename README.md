@@ -1,5 +1,7 @@
 # GolStat — aplicație de management pentru ligi de fotbal
 
+Logo-ul aplicației este în `golstat_logo.png`; păstrează acest fișier în rădăcina repository-ului când publici actualizările.
+
 ## Pregătire Supabase
 1. Deschide proiectul Supabase și rulează o singură dată `supabase_schema.sql` din SQL Editor.
 2. În `.streamlit/secrets.toml` completează `SUPABASE_URL` și cheia server-side `SUPABASE_SERVICE_ROLE_KEY`. Opțional, setează `APP_PUBLIC_URL` pentru linkurile și codurile QR de acces.
