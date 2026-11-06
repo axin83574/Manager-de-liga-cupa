@@ -12,6 +12,8 @@ import os
 import re
 import secrets
 import shutil
+import urllib.error
+import urllib.request
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -110,6 +112,146 @@ def _app_public_url():
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("Configurează APP_PUBLIC_URL cu adresa publică a aplicației Streamlit.")
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def _password_reset_mail_settings():
+    try:
+        return (str(st.secrets.get("RESEND_API_KEY", "")).strip(),
+                str(st.secrets.get("PASSWORD_RESET_FROM_EMAIL", "")).strip())
+    except Exception:
+        return "", ""
+
+
+def _send_password_reset_email(email, token):
+    api_key, sender = _password_reset_mail_settings()
+    if not api_key or not sender:
+        raise ValueError("Recuperarea parolei nu este configurată încă. Administratorul trebuie să adauge RESEND_API_KEY și PASSWORD_RESET_FROM_EMAIL în Secrets.")
+    reset_url = f"{_app_public_url()}?reset_token={token}"
+    body = {
+        "from": sender,
+        "to": [email],
+        "subject": "Resetarea parolei pentru GolStat",
+        "html": ("<p>Am primit o cerere de resetare a parolei contului tău GolStat.</p>"
+                 f"<p><a href=\"{html.escape(reset_url, quote=True)}\">Alege o parolă nouă</a></p>"
+                 "<p>Linkul expiră în 30 de minute și poate fi folosit o singură dată. "
+                 "Dacă nu ai cerut resetarea, ignoră acest mesaj.</p>"),
+    }
+    request = urllib.request.Request(
+        "https://api.resend.com/emails", data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status not in (200, 201):
+                raise ValueError("Serviciul de e-mail nu a confirmat trimiterea mesajului.")
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise ValueError("Nu am putut trimite e-mailul de resetare. Încearcă din nou mai târziu.") from exc
+
+
+def request_password_reset(email):
+    normalized_email = str(email or "").strip().casefold()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+        raise ValueError("Introdu adresa de e-mail asociată contului.")
+    if not SUPABASE_ENABLED:
+        raise ValueError("Recuperarea parolei necesită Supabase configurat.")
+    api_key, sender = _password_reset_mail_settings()
+    if not api_key or not sender:
+        raise ValueError("Recuperarea parolei nu este configurată încă. Administratorul trebuie să completeze setările de e-mail din Secrets.")
+    users = load_users()
+    username = next((key for key, record in users.items()
+                     if str(record.get("email", "")).strip().casefold() == normalized_email), None)
+    # Folosim aceeași confirmare pentru adrese existente și inexistente.
+    if username is None:
+        return
+    now = dt.datetime.now(dt.timezone.utc)
+    recent = (supabase_client().table("app_password_resets").select("id")
+        .eq("username", username)
+        .gte("created_at", (now - dt.timedelta(hours=1)).isoformat())
+        .limit(3).execute().data or [])
+    if len(recent) >= 3:
+        return
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    table = supabase_client().table("app_password_resets")
+    table.update({"used_at": now.isoformat()}).eq("username", username).is_("used_at", "null").execute()
+    table.insert({"username": username, "email": normalized_email, "token_hash": token_hash,
+        "expires_at": (now + dt.timedelta(minutes=30)).isoformat()}).execute()
+    try:
+        _send_password_reset_email(normalized_email, raw_token)
+    except Exception:
+        table.update({"used_at": now.isoformat()}).eq("token_hash", token_hash).execute()
+        raise
+
+
+def finish_password_reset(raw_token, new_password):
+    if not SUPABASE_ENABLED:
+        raise ValueError("Resetarea parolei necesită Supabase configurat.")
+    if len(new_password) < 6:
+        raise ValueError("Parola nouă trebuie să aibă cel puțin 6 caractere.")
+    token_hash = hashlib.sha256(str(raw_token or "").encode("utf-8")).hexdigest()
+    table = supabase_client().table("app_password_resets")
+    matches = (table.select("id,username,expires_at,used_at")
+        .eq("token_hash", token_hash).limit(1).execute().data or [])
+    if not matches:
+        raise ValueError("Linkul de resetare nu este valid sau a fost deja folosit. Cere un link nou.")
+    reset = matches[0]
+    expires_at = dt.datetime.fromisoformat(str(reset["expires_at"]).replace("Z", "+00:00"))
+    if reset.get("used_at") or expires_at <= dt.datetime.now(dt.timezone.utc):
+        raise ValueError("Linkul a expirat sau a fost deja folosit. Cere un link nou.")
+    username = str(reset.get("username", "")).casefold()
+    users = load_users()
+    if username not in users:
+        raise ValueError("Contul nu mai există. Contactează suportul aplicației.")
+    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+    claimed = (table.update({"used_at": now_iso}).eq("id", reset["id"])
+        .is_("used_at", "null").select("id").execute().data or [])
+    if not claimed:
+        raise ValueError("Linkul de resetare a fost deja folosit. Cere unul nou.")
+    salt, digest = password_hash(new_password)
+    users[username].update({"sare": salt, "hash": digest,
+        "iteratii": PASSWORD_ITERATIONS, "dispozitive": [], "remember_tokens": {}})
+    try:
+        save_users(users)
+    except Exception:
+        table.update({"used_at": None}).eq("id", reset["id"]).execute()
+        raise
+    return username
+
+
+def render_password_reset_page():
+    st.title("🔐 Alege o parolă nouă")
+    token = str(st.query_params.get("reset_token", "")).strip()
+    if not token:
+        st.error("Linkul de resetare nu conține un cod valid.")
+        if st.button("Înapoi la conectare", key="back_from_invalid_reset"):
+            st.query_params.clear()
+            st.rerun()
+        return
+    with st.form("complete_password_reset"):
+        new_password = st.text_input("Parolă nouă (minimum 6 caractere)", type="password")
+        confirm_password = st.text_input("Confirmă parola nouă", type="password")
+        submit = st.form_submit_button("Salvează parola", type="primary", width="stretch")
+    if submit:
+        if new_password != confirm_password:
+            st.error("Parolele nu coincid.")
+        else:
+            try:
+                finish_password_reset(token, new_password)
+                st.query_params.clear()
+                st.session_state.pop("user_key", None)
+                st.session_state.pop("entered_league", None)
+                st.session_state.pop("active_league_picker", None)
+                st.session_state.pop("remembered_username", None)
+                st.session_state.pop("remembered_token_hash", None)
+                st.session_state["password_reset_completed"] = True
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception:
+                st.error("Nu am putut salva parola momentan. Încearcă din nou sau cere un link nou.")
+    if st.button("Înapoi la conectare", key="back_from_password_reset"):
+        st.query_params.clear()
+        st.rerun()
 
 
 def create_league_checkout_session(username, name, league_type, source_entry, profile):
@@ -4257,6 +4399,8 @@ def render_account_profile(username, profile, paths, player_only=False):
         st.info("Nu ai fost încă în nicio ligă. Când intri într-o ligă, ea va apărea aici.")
 
 def auth_view(cookie_manager):
+    if st.session_state.pop("password_reset_completed", False):
+        st.success("Parola a fost schimbată. Conectează-te cu noua parolă.")
     st.markdown(f"## {tr('Intră în cont sau creează un profil')}")
     st.caption(tr("Te poți conecta cu numele de utilizator sau adresa de e-mail asociată contului."))
     if not SUPABASE_ENABLED:
@@ -4267,7 +4411,8 @@ def auth_view(cookie_manager):
         if st.button("Reîncearcă salvarea conectării", type="primary"):
             remember_account(cookie_manager, pending["username"])
         return
-    login_tab, signup_tab = st.tabs([tr("Autentificare"), tr("Cont nou")])
+    login_tab, signup_tab, recovery_tab = st.tabs(
+        [tr("Autentificare"), tr("Cont nou"), "Am uitat parola"])
     with login_tab:
         with st.form("login_account"):
             username = st.text_input(tr("Nume de utilizator sau e-mail"))
@@ -4310,6 +4455,19 @@ def auth_view(cookie_manager):
                     st.rerun()
                 attempts.append(now)
                 st.error("E-mailul/numele de utilizator sau parola nu corespund. Dacă acest cont a fost creat înainte să adaugi e-mailul, conectează-te cu numele de utilizator.")
+    with recovery_tab:
+        st.caption("Introdu adresa de e-mail asociată contului. Dacă există un cont cu această adresă, îți trimitem un link de resetare valabil 30 de minute.")
+        with st.form("request_password_reset_form"):
+            recovery_email = st.text_input("Adresa de e-mail", key="password_recovery_email")
+            request_reset = st.form_submit_button("Trimite linkul de resetare", type="primary")
+        if request_reset:
+            try:
+                request_password_reset(recovery_email)
+                st.success("Dacă există un cont cu această adresă, vei primi în curând un link de resetare. Verifică și folderul Spam.")
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception:
+                st.error("Nu am putut trimite linkul momentan. Încearcă din nou mai târziu.")
     with signup_tab:
         with st.form("signup_account"):
             username = st.text_input(tr("Nume de utilizator"), key="new_username")
@@ -4783,6 +4941,9 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
     is_guest = is_legacy_guest
     username = st.session_state.get("user_key")
     users = load_users()
+    if str(st.query_params.get("reset_token", "")).strip():
+        render_password_reset_page()
+        return
     if is_code_access and (not username or username not in users):
         auth_view(cookie_manager)
         return
