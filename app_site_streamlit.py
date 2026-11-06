@@ -1418,7 +1418,8 @@ def make_supercup(name, team_a, team_b, source_cup_id=None, tur_retur=False):
 
 def definitii_premii(data):
     league_name = data.get("nume_liga") or "Liga"
-    awards = [{"cheie": "campioana", "titlu": "🏆 Campioana ligii", "tip": "echipa",
+    cup_only = data.get("tip_competitie") == "Cupă"
+    awards = [] if cup_only else [{"cheie": "campioana", "titlu": "🏆 Campioana ligii", "tip": "echipa",
                "trofeu": f"Campioană — {league_name}"}]
     for cup in data.get("cupe", []):
         awards.append({"cheie": f"cupa:{cup.get('id')}",
@@ -1426,7 +1427,8 @@ def definitii_premii(data):
                      else f"🏆 Câștigătoarea — {cup.get('nume', 'Cupa')}",
             "tip": "echipa", "trofeu": (f"Trofeul Supercupei — {cup.get('nume', 'Supercupa')}"
                 if cup.get("super") else f"Câștigătoare {cup.get('nume', 'Cupa')}")})
-    awards.append({"cheie": "gheata_liga", "titlu": "👟 Gheata de Aur — Ligă", "tip": "jucator", "trofeu": "Gheata de Aur — Ligă"})
+    if not cup_only:
+        awards.append({"cheie": "gheata_liga", "titlu": "👟 Gheata de Aur — Ligă", "tip": "jucator", "trofeu": "Gheata de Aur — Ligă"})
     if any(not cup.get("super") for cup in data.get("cupe", [])):
         awards.append({"cheie": "gheata_cupa", "titlu": "👟 Gheata de Aur — Cupă", "tip": "jucator", "trofeu": "Gheata de Aur — Cupă"})
     awards.extend([
