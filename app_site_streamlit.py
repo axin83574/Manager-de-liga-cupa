@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import streamlit as st
 import extra_streamlit_components as stx
+import stripe
 from supabase import create_client
 
 try:
@@ -83,6 +84,63 @@ def _supabase_settings():
                 str(st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")).strip())
     except Exception:
         return "", ""
+
+
+LEAGUE_CREATION_PRICES_CENTS = {"Cupă": 50, "Ligă": 75, "Ligă + cupă": 100}
+
+
+def _stripe_api_key():
+    try:
+        return str(st.secrets.get("STRIPE_SECRET_KEY", "")).strip()
+    except Exception:
+        return ""
+
+
+def _app_public_url():
+    try:
+        configured_url = str(st.secrets.get("APP_PUBLIC_URL", "")).strip()
+    except Exception:
+        configured_url = ""
+    if not configured_url:
+        try:
+            configured_url = str(st.context.url or "").strip()
+        except Exception:
+            configured_url = ""
+    parsed = urlsplit(configured_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Configurează APP_PUBLIC_URL cu adresa publică a aplicației Streamlit.")
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def create_league_checkout_session(username, name, league_type, source_entry, profile):
+    api_key = _stripe_api_key()
+    if not api_key:
+        raise ValueError("Lipsește STRIPE_SECRET_KEY din Secrets. Configurează cheia Stripe înainte să activezi plățile.")
+    if not SUPABASE_ENABLED:
+        raise ValueError("Plata și crearea ligii necesită Supabase configurat.")
+    if league_type not in LEAGUE_CREATION_PRICES_CENTS:
+        raise ValueError("Tipul competiției nu este valid.")
+    clean_name = str(name or "").strip()[:100] or "Liga mea"
+    stripe.api_key = api_key
+    base_url = _app_public_url()
+    price_cents = LEAGUE_CREATION_PRICES_CENTS[league_type]
+    product_name = f"Creare competiție: {clean_name} ({league_type})"
+    session_args = {
+        "mode": "payment",
+        "line_items": [{"price_data": {"currency": "eur", "unit_amount": price_cents,
+            "product_data": {"name": product_name}}, "quantity": 1}],
+        "success_url": f"{base_url}?plata=success&session_id={{CHECKOUT_SESSION_ID}}",
+        "cancel_url": f"{base_url}?plata=cancelled",
+        "client_reference_id": username,
+        "metadata": {"owner_username": username, "league_name": clean_name,
+            "league_type": league_type,
+            "source_league": league_key(source_entry) if source_entry else ""},
+        "payment_intent_data": {"description": product_name},
+    }
+    email = str(profile.get("email", "")).strip()
+    if email and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        session_args["customer_email"] = email
+    return stripe.checkout.Session.create(**session_args)
 
 
 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY = _supabase_settings()
@@ -772,9 +830,16 @@ def save_code_member_choice(entry, username, team=None, player=None):
             st.session_state["player_profile_sync_error"] = str(exc)
 
 
-def create_user_league(username, name, source_entry=None, league_type="Ligă"):
+def create_user_league(username, name, source_entry=None, league_type="Ligă", payment_session_id=None):
     if SUPABASE_ENABLED:
-        path = db_league_path(username, uuid.uuid4())
+        league_id = (uuid.uuid5(uuid.NAMESPACE_URL, f"stripe-checkout:{payment_session_id}")
+                     if payment_session_id else uuid.uuid4())
+        path = db_league_path(username, league_id)
+        if payment_session_id:
+            existing_rows = (supabase_client().table("app_leagues").select("data")
+                .eq("id", str(league_id)).eq("owner_username", username).limit(1).execute().data or [])
+            if existing_rows and (existing_rows[0].get("data") or {}).get("stripe_checkout_session_id") == payment_session_id:
+                return path
         copied_teams = {}
         if source_entry:
             source_data = load_league(source_entry["path"])
@@ -787,6 +852,8 @@ def create_user_league(username, name, source_entry=None, league_type="Ligă"):
                         "echipe": copied_teams,
                         "istoric_meciuri": [], "program": [], "transferuri": [], "cupe": [], "membri": [],
                         "coduri_invitat": new_league_access_codes()}
+        if payment_session_id:
+            created_data["stripe_checkout_session_id"] = payment_session_id
         if league_type in ("Ligă + cupă", "Cupă"):
             cup = make_cup(list(copied_teams), f"Cupa {created_data['nume_liga']}") if len(copied_teams) >= 2 else {
                 "id": uuid.uuid4().hex[:8], "nume": f"Cupa {created_data['nume_liga']}", "runde": [],
@@ -816,6 +883,8 @@ def create_user_league(username, name, source_entry=None, league_type="Ligă"):
                     "echipe": copied_teams,
                     "istoric_meciuri": [], "program": [], "transferuri": [], "cupe": [], "membri": [],
                     "coduri_invitat": new_league_access_codes()}
+    if payment_session_id:
+        created_data["stripe_checkout_session_id"] = payment_session_id
     if league_type in ("Ligă + cupă", "Cupă"):
         cup = make_cup(list(copied_teams), f"Cupa {created_data['nume_liga']}") if len(copied_teams) >= 2 else {
             "id": uuid.uuid4().hex[:8], "nume": f"Cupa {created_data['nume_liga']}", "runde": [],
@@ -4763,6 +4832,67 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
         profile = users[username]
         profile.setdefault("selectii_ligi", {})
         paths = get_user_leagues(username)
+    checkout_status = str(st.query_params.get("plata", "")).strip().casefold()
+    checkout_session_id = str(st.query_params.get("session_id", "")).strip()
+    if checkout_status == "cancelled":
+        st.info("Plata a fost anulată. Nu s-a creat nicio ligă și nu s-a încasat suma.")
+        st.query_params.clear()
+    elif checkout_status == "success" and checkout_session_id:
+        try:
+            if is_guest or not SUPABASE_ENABLED:
+                raise ValueError("Conectează-te la contul care a început plata; crearea plătită necesită Supabase.")
+            api_key = _stripe_api_key()
+            if not api_key:
+                raise ValueError("Lipsește STRIPE_SECRET_KEY din Secrets.")
+            stripe.api_key = api_key
+            checkout = stripe.checkout.Session.retrieve(checkout_session_id)
+            metadata = checkout.metadata or {}
+            expected_type = str(metadata.get("league_type", ""))
+            expected_amount = LEAGUE_CREATION_PRICES_CENTS.get(expected_type)
+            if (str(metadata.get("owner_username", "")).casefold() != username.casefold()
+                    or checkout.client_reference_id != username
+                    or expected_amount is None
+                    or checkout.currency != "eur"
+                    or int(checkout.amount_total or 0) != expected_amount):
+                raise ValueError("Detaliile plății nu corespund contului sau tipului de competiție.")
+            if checkout.payment_status != "paid":
+                st.info("Plata este încă în curs de confirmare. Reîncearcă verificarea în câteva momente.")
+                if st.button("Verifică plata din nou", type="primary", key="retry_league_payment_check"):
+                    st.rerun()
+                return
+            source_key = str(metadata.get("source_league", ""))
+            source_entry = next((item for item in paths if league_key(item) == source_key), None) if source_key else None
+            if source_key and source_entry is None:
+                raise ValueError("Liga-sursă selectată nu mai este disponibilă în contul tău. Contactează suportul aplicației.")
+            existing_entry = None
+            for entry in get_user_leagues(username, include_hidden=True):
+                saved = load_league(entry["path"])
+                if saved.get("stripe_checkout_session_id") == checkout_session_id:
+                    existing_entry = entry
+                    break
+            if existing_entry is None:
+                created_path = create_user_league(
+                    username, str(metadata.get("league_name", "Liga mea")), source_entry,
+                    expected_type, payment_session_id=checkout_session_id)
+                existing_entry = next((item for item in get_user_leagues(username, include_hidden=True)
+                    if item.get("role") == "owner" and item["path"] == created_path), None)
+            if existing_entry is None:
+                raise ValueError("Plata a fost confirmată, dar liga nu a apărut în cont. Contactează suportul cu ID-ul plății.")
+            st.session_state["entered_league"] = league_key(existing_entry)
+            st.session_state["active_league_role"] = "owner"
+            st.query_params.clear()
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+            if st.button("Înapoi la aplicație", key="return_from_league_payment_error"):
+                st.query_params.clear()
+                st.rerun()
+            return
+        except Exception:
+            st.error("Nu am putut confirma plata momentan. Încearcă din nou; dacă plata a fost încasată, nu porni o a doua plată și contactează suportul aplicației.")
+            if st.button("Reîncearcă verificarea", key="retry_league_payment_error"):
+                st.rerun()
+            return
     st.session_state.setdefault("login_attempts", [])
     st.session_state["active_league_role"] = "owner"
     with st.sidebar:
@@ -4847,21 +4977,23 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                         format_func=lambda item: tr("Ligă goală") if item is None else
                             f"{load_league(item['path']).get('nume_liga', item['path'].stem)} · @{item['owner']}")
                     league_type = st.selectbox(tr("Tipul competiției"), ["Ligă", "Ligă + cupă", "Cupă"], format_func=tr)
-                    create = st.form_submit_button(tr("Creează liga"), type="primary", width="stretch")
+                    price_cents = LEAGUE_CREATION_PRICES_CENTS[league_type]
+                    st.caption(f"Cost creare: {price_cents // 100},{price_cents % 100:02d} € · plata procesată în siguranță prin Stripe.")
+                    create = st.form_submit_button(
+                        f"Continuă la plată · {price_cents // 100},{price_cents % 100:02d} €",
+                        type="primary", width="stretch")
                 if create:
+                    st.session_state.pop("league_checkout_url", None)
                     try:
-                        created_path = create_user_league(username, new_name, source_entry, league_type)
-                        saved_entry = next((item for item in get_user_leagues(username)
-                            if item.get("role") == "owner" and item["path"] == created_path), None)
-                        if not saved_entry:
-                            raise ValueError("Liga a fost creată, dar nu apare încă în lista ligilor contului. Reîncarcă pagina și verifică dacă a fost salvată.")
-                        st.session_state["entered_league"] = league_key(saved_entry)
-                        st.session_state["active_league_role"] = "owner"
-                        st.session_state.pop("active_league_picker", None)
-                        st.rerun()
+                        checkout = create_league_checkout_session(
+                            username, new_name, league_type, source_entry, profile)
+                        st.session_state["league_checkout_url"] = checkout.url
                     except Exception as exc:
-                        st.error("Liga nu a putut fi creată și confirmată în stocare.")
-                        st.caption(f"Detaliu: {exc}")
+                        st.error(str(exc))
+                checkout_url = st.session_state.get("league_checkout_url")
+                if checkout_url:
+                    st.link_button("Deschide plata securizată", checkout_url,
+                                   type="primary", width="stretch")
         with enter_col:
             with st.container(border=True):
                 st.markdown(f"### 📂 {tr('Intră în ligă')}")
