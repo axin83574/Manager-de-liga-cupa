@@ -12,6 +12,11 @@ Logo-ul aplicației este în `golstat_logo.png`; păstrează acest fișier în r
 2. În Secrets, setează `SUPPORT_ADMIN_USERNAME` la numele contului aplicației care trebuie să primească mesajele.
 3. Utilizatorii pot trimite buguri, cereri de modificare sau întrebări din butonul „Suportul aplicației”, chiar dacă nu au intrat într-o ligă. Mesajele și adresele pentru răspuns sunt vizibile doar contului de suport.
 
+## Recuperarea parolei
+1. Rulează din nou `supabase_schema.sql` în Supabase SQL Editor pentru a crea tabela privată `app_password_resets`.
+2. Configurează un cont Resend și verifică un domeniu de trimitere. În Streamlit Cloud → App settings → Secrets adaugă `RESEND_API_KEY`, `PASSWORD_RESET_FROM_EMAIL` (de forma `GolStat <noreply@domeniul-tau.ro>`) și `APP_PUBLIC_URL` cu adresa publică a aplicației.
+3. Linkurile sunt de unică folosință, expiră în 30 de minute, iar aplicația limitează cererile repetate. La resetare sunt revocate și sesiunile persistente ale contului.
+
 ## Plată pentru crearea ligilor
 Crearea unei competiții este procesată prin Stripe Checkout: Cupă — 0,50 €, Ligă — 0,75 €, Ligă + cupă — 1,00 €. Suma este stabilită pe server și verificată înainte ca aplicația să creeze liga.
 
