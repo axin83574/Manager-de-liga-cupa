@@ -4790,9 +4790,6 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                 st.session_state["show_account_profile"] = True
                 st.session_state["show_player_profile"] = True
                 st.rerun()
-        if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support"):
-            st.session_state["show_global_support"] = True
-            st.rerun()
         st.divider()
     if st.session_state.get("show_global_support"):
         if st.button("← Înapoi la aplicație", key="back_from_global_support"):
@@ -4914,6 +4911,11 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     else:
                         st.query_params["cod"] = normalized_code
                         st.rerun()
+        with st.sidebar:
+            st.divider()
+            if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support_launcher"):
+                st.session_state["show_global_support"] = True
+                st.rerun()
         return
     chosen_key = entered_key
     selected_entry = by_key[chosen_key]
@@ -4934,6 +4936,11 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     st.session_state[manager_view_key] = True
                     st.rerun()
             if st.session_state.get(manager_view_key):
+                with st.sidebar:
+                    st.divider()
+                    if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support_team_manager"):
+                        st.session_state["show_global_support"] = True
+                        st.rerun()
                 if st.button("← Înapoi la ligă", key="back_from_team_manager"):
                     st.session_state.pop(manager_view_key, None)
                     st.rerun()
@@ -4949,6 +4956,11 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
                     st.session_state.pop("entered_league", None)
                     st.session_state.pop("active_league_picker", None)
                     st.rerun()
+        with st.sidebar:
+            st.divider()
+            if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support_viewer"):
+                st.session_state["show_global_support"] = True
+                st.rerun()
         return
     pages = ["Clasament", "Statistici", "Echipe și jucători", "Meciuri și program", "Arbitraj", "Cupa",
             "Supercupa", "Premii sezon", "Transferuri", "Membri", "Import / export", "Setări ligă"]
@@ -5009,6 +5021,12 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
             if st.button(f"↩ {tr('Schimbă liga')}", width="stretch", key="change_league_member"):
                 st.session_state.pop("entered_league", None)
                 st.session_state.pop("active_league_picker", None)
+                st.rerun()
+    if is_guest:
+        with st.sidebar:
+            st.divider()
+            if st.button("💬 Suportul aplicației", width="stretch", key="open_global_support_guest_member"):
+                st.session_state["show_global_support"] = True
                 st.rerun()
 
     if page == "Alegerea mea" and is_guest:
