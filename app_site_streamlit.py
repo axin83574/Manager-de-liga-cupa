@@ -1,4 +1,4 @@
-"""Manager de ligă Streamlit, cu stocare Supabase și fallback local pentru dezvoltare."""
+"""GolStat — aplicație Streamlit pentru ligi, meciuri și statistici de fotbal."""
 from __future__ import annotations
 
 import copy
@@ -4351,7 +4351,7 @@ def auth_view(cookie_manager):
 
 
 def main():
-    st.set_page_config(page_title="Liga de fotbal", page_icon="⚽", layout="wide",
+    st.set_page_config(page_title="GolStat", page_icon="⚽", layout="wide",
                        initial_sidebar_state="auto")
     cookie_manager = stx.CookieManager(key="persistent_cookie_manager")
     # Tema este fixată pe întunecat pentru a evita diferențele de contrast
@@ -4751,7 +4751,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
       </a>
     </div>
     ''', unsafe_allow_html=True)
-    st.title(f"⚽ {tr('Managerul ligii de fotbal')}")
+    st.title("⚽ GolStat")
     st.markdown('<div class="league-subtitle">Clasamente, meciuri și cupe într-un singur loc</div>', unsafe_allow_html=True)
     access_code = str(st.query_params.get("cod", "")).strip()
     invite_token = str(st.query_params.get("invitat", "")).strip()
@@ -4961,7 +4961,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
         st.session_state.pop("entered_league", None)
         entered_key = None
     if entered_key is None:
-        st.markdown(f"## {tr('Bine ai venit în Managerul Ligii de Fotbal')}")
+        st.markdown("## Bine ai venit în GolStat")
         st.caption(tr("Creează o ligă nouă sau intră într-o ligă pe care o administrezi ori care ți-a fost partajată."))
         if not SUPABASE_ENABLED:
             st.warning("Supabase nu este conectat: ligile se salvează doar local și se pot pierde când aplicația repornește. Verifică SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY în Secrets.")
