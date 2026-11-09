@@ -3293,7 +3293,7 @@ def render_live_ticker(path):
         unsafe_allow_html=True)
 
 
-def render_cards(rows, team_data=None):
+def render_cards(rows, team_data=None, table_mode=False):
     """Render compact, themed rows matching the original app's Treeview tables."""
     rows = list(rows)
     if not rows:
@@ -3322,7 +3322,9 @@ def render_cards(rows, team_data=None):
                 shown = f"<span class='team-name-cell'>{image}<span>{shown}</span></span>"
             rendered_cells.append(f'<td data-label="{label}">{shown}</td>')
         body_rows.append(f"<tr>{''.join(rendered_cells)}</tr>")
-    markup = ("<div class='league-table-wrap'><table class='league-table'>"
+    wrapper_class = "league-table-wrap classic-table-wrap" if table_mode else "league-table-wrap"
+    table_class = "league-table classic-table" if table_mode else "league-table"
+    markup = (f"<div class='{wrapper_class}'><table class='{table_class}'>"
               f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
               "</table></div>")
     st.markdown(markup, unsafe_allow_html=True)
@@ -4720,6 +4722,14 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
  table.league-table td:before{content:attr(data-label);color:#9aabc0;font-size:.72rem;font-weight:800;text-align:left}
  table.league-table tr td:first-child{font-weight:850;color:#f3f7fc!important}
  table.league-table tr td:first-child:before{content:"";display:none}
+ .classic-table-wrap{overflow-x:auto!important;border:1px solid var(--line)!important;background:var(--panel)!important;border-radius:14px!important;box-shadow:0 5px 16px rgba(0,0,0,.12)!important;-webkit-overflow-scrolling:touch}
+ table.league-table.classic-table,table.league-table.classic-table tbody{display:table!important;width:100%!important;min-width:620px}
+ table.league-table.classic-table thead{display:table-header-group!important}
+ table.league-table.classic-table tr{display:table-row!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+ table.league-table.classic-table th,table.league-table.classic-table td{display:table-cell!important;padding:.58rem .65rem!important;white-space:nowrap!important;border-bottom:1px solid var(--line)!important;text-align:left!important}
+ table.league-table.classic-table td:before{display:none!important;content:none!important}
+ table.league-table.classic-table tr td:first-child{font-weight:850;color:#f3f7fc!important}
+ table.league-table.classic-table .team-name-cell{justify-content:flex-start}
  .team-name-cell{justify-content:flex-end}
  .team-avatar{width:1.65rem;height:1.65rem}
  .team-logo-inline{width:1.65rem;height:1.65rem}
@@ -5178,7 +5188,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
         c2.metric("Meciuri", len(data["istoric_meciuri"]))
         c3.metric("Jucători", sum(len(t["jucatori"]) for t in data["echipe"].values()))
         if data["echipe"]:
-            render_cards(ranking(data), data.get("echipe", {}))
+            render_cards(ranking(data), data.get("echipe", {}), table_mode=True)
             st.caption("Forma ultimelor cinci meciuri: V = victorie · E = egal · Î = înfrângere")
         else:
             st.info("Adaugă echipe pentru a vedea clasamentul.")
@@ -6171,7 +6181,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
             with tab:
                 rows = player_leaderboard(data, field, label)
                 if rows:
-                    render_cards(rows)
+                    render_cards(rows, table_mode=True)
                 else:
                     st.info("Încă nu există date pentru acest top.")
 
