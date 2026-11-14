@@ -3324,7 +3324,9 @@ def render_cards(rows, team_data=None, table_mode=False):
         body_rows.append(f"<tr>{''.join(rendered_cells)}</tr>")
     wrapper_class = "league-table-wrap classic-table-wrap" if table_mode else "league-table-wrap"
     table_class = "league-table classic-table" if table_mode else "league-table"
-    markup = (f"<div class='{wrapper_class}'><table class='{table_class}'>"
+    table_id = " id='classic-league-table'" if table_mode else ""
+    wrapper_id = " id='classic-league-table-wrap'" if table_mode else ""
+    markup = (f"<div class='{wrapper_class}'{wrapper_id}><table class='{table_class}'{table_id}>"
               f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
               "</table></div>")
     st.markdown(markup, unsafe_allow_html=True)
@@ -4722,15 +4724,16 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
  table.league-table td:before{content:attr(data-label);color:#9aabc0;font-size:.72rem;font-weight:800;text-align:left}
  table.league-table tr td:first-child{font-weight:850;color:#f3f7fc!important}
  table.league-table tr td:first-child:before{content:"";display:none}
- .classic-table-wrap{overflow-x:auto!important;border:1px solid var(--line)!important;background:var(--panel)!important;border-radius:14px!important;box-shadow:0 5px 16px rgba(0,0,0,.12)!important;-webkit-overflow-scrolling:touch}
- table.league-table.classic-table{display:table!important;width:max-content!important;min-width:620px!important;table-layout:auto!important}
- table.league-table.classic-table tbody{display:table-row-group!important;width:auto!important;min-width:0!important}
- table.league-table.classic-table thead{display:table-header-group!important}
- table.league-table.classic-table tr{display:table-row!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
- table.league-table.classic-table th,table.league-table.classic-table td{display:table-cell!important;padding:.58rem .65rem!important;white-space:nowrap!important;border-bottom:1px solid var(--line)!important;text-align:left!important}
- table.league-table.classic-table td:before{display:none!important;content:none!important}
- table.league-table.classic-table tr td:first-child{font-weight:850;color:#f3f7fc!important}
- table.league-table.classic-table .team-name-cell{justify-content:flex-start}
+  #classic-league-table-wrap{display:block!important;width:100%!important;max-width:100%!important;overflow-x:auto!important;overflow-y:hidden!important;border:1px solid var(--line)!important;background:var(--panel)!important;border-radius:14px!important;box-shadow:0 5px 16px rgba(0,0,0,.12)!important;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  #classic-league-table{display:table!important;width:max-content!important;min-width:760px!important;table-layout:auto!important;border-collapse:collapse!important;border-spacing:0!important}
+  #classic-league-table thead{display:table-header-group!important;visibility:visible!important}
+  #classic-league-table tbody{display:table-row-group!important;width:auto!important;min-width:0!important}
+  #classic-league-table thead tr,#classic-league-table tbody tr{display:table-row!important;width:auto!important;min-width:0!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+  #classic-league-table thead th,#classic-league-table tbody td{display:table-cell!important;position:static!important;visibility:visible!important;height:auto!important;min-width:max-content!important;padding:.58rem .65rem!important;white-space:nowrap!important;border-bottom:1px solid var(--line)!important;text-align:left!important;vertical-align:middle!important;transform:none!important}
+  #classic-league-table thead th{background:var(--panel2)!important;color:var(--muted)!important;font-size:.76rem!important;font-weight:750!important}
+  #classic-league-table tbody td:before{display:none!important;content:none!important}
+  #classic-league-table tbody tr td:first-child{font-weight:850;color:#f3f7fc!important}
+  #classic-league-table .team-name-cell{display:inline-flex!important;justify-content:flex-start!important;white-space:nowrap!important}
  .team-name-cell{justify-content:flex-end}
  .team-avatar{width:1.65rem;height:1.65rem}
  .team-logo-inline{width:1.65rem;height:1.65rem}
