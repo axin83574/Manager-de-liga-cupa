@@ -3329,6 +3329,30 @@ def render_cards(rows, team_data=None, table_mode=False):
     markup = (f"<div class='{wrapper_class}'{wrapper_id}><table class='{table_class}'{table_id}>"
               f"<thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
               "</table></div>")
+    if table_mode:
+        mobile_cards = []
+        for row in rows:
+            cells = []
+            for index, column in enumerate(columns):
+                value = row.get(column)
+                shown = html.escape(str(tr(value) if value not in (None, "") else "–"))
+                if column == "Echipă" and value not in (None, ""):
+                    words = [word for word in str(value).split()
+                             if word.casefold() not in {"fc", "sc", "cs", "ac", "afc"}]
+                    initials = "".join(word[0] for word in words[:2]).upper() or "⚽"
+                    team = (team_data or {}).get(str(value), {})
+                    logo = team.get("logo", "") if isinstance(team, dict) else ""
+                    image = (f"<img class='team-logo-inline' src='{html.escape(logo, quote=True)}' alt=''>"
+                             if _team_logo_bytes(team) else
+                             f"<span class='team-avatar' aria-hidden='true'>{html.escape(initials)}</span>")
+                    shown = f"<span class='team-name-cell'>{image}<span>{shown}</span></span>"
+                label = html.escape(str(tr(column)), quote=True)
+                if index == 0:
+                    cells.append(f"<div class='mobile-table-title'>{shown}</div>")
+                else:
+                    cells.append(f"<div class='mobile-table-stat'><span>{label}</span><strong>{shown}</strong></div>")
+            mobile_cards.append(f"<article class='mobile-table-card'>{''.join(cells)}</article>")
+        markup += f"<div class='mobile-table-cards'>{''.join(mobile_cards)}</div>"
     st.markdown(markup, unsafe_allow_html=True)
 
 
@@ -4724,16 +4748,16 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
  table.league-table td:before{content:attr(data-label);color:#9aabc0;font-size:.72rem;font-weight:800;text-align:left}
  table.league-table tr td:first-child{font-weight:850;color:#f3f7fc!important}
  table.league-table tr td:first-child:before{content:"";display:none}
-  #classic-league-table-wrap{display:block!important;width:100%!important;max-width:100%!important;overflow-x:auto!important;overflow-y:hidden!important;border:1px solid var(--line)!important;background:var(--panel)!important;border-radius:14px!important;box-shadow:0 5px 16px rgba(0,0,0,.12)!important;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
-  #classic-league-table{display:table!important;width:max-content!important;min-width:760px!important;table-layout:auto!important;border-collapse:collapse!important;border-spacing:0!important}
-  #classic-league-table thead{display:table-header-group!important;visibility:visible!important}
-  #classic-league-table tbody{display:table-row-group!important;width:auto!important;min-width:0!important}
-  #classic-league-table thead tr,#classic-league-table tbody tr{display:table-row!important;width:auto!important;min-width:0!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
-  #classic-league-table thead th,#classic-league-table tbody td{display:table-cell!important;position:static!important;visibility:visible!important;height:auto!important;min-width:max-content!important;padding:.58rem .65rem!important;white-space:nowrap!important;border-bottom:1px solid var(--line)!important;text-align:left!important;vertical-align:middle!important;transform:none!important}
-  #classic-league-table thead th{background:var(--panel2)!important;color:var(--muted)!important;font-size:.76rem!important;font-weight:750!important}
-  #classic-league-table tbody td:before{display:none!important;content:none!important}
-  #classic-league-table tbody tr td:first-child{font-weight:850;color:#f3f7fc!important}
-  #classic-league-table .team-name-cell{display:inline-flex!important;justify-content:flex-start!important;white-space:nowrap!important}
+  #classic-league-table-wrap{overflow:visible!important;border:0!important;background:transparent!important;box-shadow:none!important}
+  #classic-league-table{display:none!important}
+  #classic-league-table-wrap .mobile-table-cards{display:grid!important;grid-template-columns:1fr!important;gap:.55rem!important}
+  #classic-league-table-wrap .mobile-table-card{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:.35rem .25rem!important;align-items:stretch!important;padding:.6rem .65rem!important;border:1px solid #2b3e56!important;border-radius:12px!important;background:linear-gradient(145deg,#14243a,#111c2c)!important;box-shadow:0 4px 12px rgba(0,0,0,.12)!important}
+  #classic-league-table-wrap .mobile-table-title{grid-column:1/-1!important;padding:0 0 .42rem!important;margin-bottom:.12rem!important;border-bottom:1px solid #2b3e56!important;color:#f3f7fc!important;font-weight:850!important;font-size:.9rem!important;overflow-wrap:anywhere}
+  #classic-league-table-wrap .mobile-table-stat{display:flex!important;min-width:0!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:.08rem!important;padding:.28rem .12rem!important;border-radius:7px!important;background:rgba(255,255,255,.025)!important;text-align:center!important}
+  #classic-league-table-wrap .mobile-table-stat>span{color:#91a4bb!important;font-size:.62rem!important;line-height:1.15!important;font-weight:750!important;overflow-wrap:anywhere}
+  #classic-league-table-wrap .mobile-table-stat>strong{color:#edf3fa!important;font-size:.8rem!important;line-height:1.2!important;font-weight:800!important;overflow-wrap:anywhere}
+  #classic-league-table-wrap .team-name-cell{display:inline-flex!important;justify-content:flex-start!important;white-space:normal!important}
+  #classic-league-table-wrap .team-avatar,#classic-league-table-wrap .team-logo-inline{width:1.5rem!important;height:1.5rem!important}
  .team-name-cell{justify-content:flex-end}
  .team-avatar{width:1.65rem;height:1.65rem}
  .team-logo-inline{width:1.65rem;height:1.65rem}
@@ -4750,6 +4774,7 @@ a.bike-ad-banner{border-radius:18px!important;box-shadow:0 15px 35px rgba(0,0,0,
  a.bike-ad-banner{padding:.8rem!important;gap:.65rem!important}
  .lineup-pitch{width:100%;overflow:hidden}
 }
+@media(min-width:768px){#classic-league-table-wrap .mobile-table-cards{display:none!important}}
 
 </style>
         """, unsafe_allow_html=True)
